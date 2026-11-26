@@ -49,12 +49,16 @@ VDOT_MAX_GAIN_WEEKS = 3
 MIN_WEEKS = {"5k": 6, "10k": 8, "HM": 10, "FM": 12}
 TYPICAL_WEEKS = {"5k": (8, 12), "10k": (10, 12), "HM": (12, 16), "FM": (16, 20)}
 # Minimum base to start a race plan: (weekly km, long run km) by load tier = beginner.
-MIN_BASE = {"5k": (8.0, 3.0), "10k": (12.0, 5.0), "HM": (15.0, 6.0), "FM": (30.0, 13.0)}
+MIN_BASE = {"5k": (8.0, 3.0), "10k": (12.0, 5.0), "HM": (15.0, 6.0), "FM": (40.0, 16.0)}
+# Reachability: projected peak long run must reach (km, minutes) — either satisfies. [C/H]
+# Races are exempt from the spike rule, so this is what keeps the race itself reasonable.
+MIN_PEAK_LONG_RUN = {"HM": (16.0, 105.0), "FM": (26.0, 165.0)}
 
 # Plausible VDOT gain per ~14-week block by performance tier. [H]
 VDOT_GAIN_RANGE = {"developing": (3.0, 6.0), "intermediate": (1.0, 3.0), "advanced": (0.5, 1.5)}
 FEASIBILITY_REF_WEEKS = 14
-STRETCH_FACTOR = 1.5
+# ΔVDOT ≤ range midpoint → accepted; ≤ top → stretch; > top → unrealistic. [H]
+CONSERVATIVE_GOAL_DELTA_VDOT = -1.0   # goal this far below current fitness gets a note [H]
 
 # Phase fractions of non-taper weeks: (base, build, specific). [C/H]
 PHASE_SPLIT = {
@@ -84,9 +88,13 @@ MAX_WEEKLY_INCREASE = 0.20                    # vs. last build week [E/H]
 MAX_TWO_WEEK_INCREASE = 0.30                  # [E: Nielsen 2014]
 DOWN_WEEK_CUT = 0.22                          # [C]
 MASTERS_AGE = 50
+ADAPT_CONSISTENT_OF_LAST = (2, 3)   # "consistently" = 2 of the last 3 sessions [H]
 
 # --- Long run (§6.4) -------------------------------------------------------
 SPIKE_LIMIT = 1.10            # any run <= 110% of longest run in prior 30 days [E: Frandsen 2025]
+SPIKE_WINDOW_DAYS = 30
+SPIKE_LIMIT_AFTER_INJURY = 1.05   # injury in last 12 months or bone-stress ever [H]
+RACE_EVE_MAX_KM = 4.0            # run the day before a race [C]
 # Max long-run share of weekly volume by run days. 30% is the default [C]; with fewer
 # days the long run cannot be ≤ 30% without being shorter than an average run, so the
 # cap rises and the plan carries a warning. [H]
@@ -107,6 +115,8 @@ PEAK_LONG_RUN_POSITION = 0.4  # where in the range to aim [H]
 # --- Intensity (§6.3) -------------------------------------------------------
 MIN_EASY_SHARE = 0.80             # of running time [E/C]
 MIN_EASY_SHARE_BEGINNER = 0.85
+AEROBIC_BASE_MIN_EASY_SHARE = 0.90   # [C] §7.3
+SPEED_LONG_RUN_SHARE = 0.25          # [C] §7.2
 # Session dose caps: (fraction of weekly volume, absolute km cap). [C: Daniels]
 DOSE_CAP = {"T": (0.10, 99.0), "I": (0.08, 10.0), "R": (0.05, 8.0), "M": (0.20, 29.0),
             "10k": (0.12, 9.0), "HM": (0.20, 16.0), "5k": (0.08, 10.0)}
@@ -133,7 +143,8 @@ RECOVERY_NO_HARD_DAYS = {"5k": 2, "10k": 3, "HM": 7, "FM": 14}
 RUN_WALK_LADDER = ((1, 1, 10), (2, 1, 8), (3, 1, 7), (4, 1, 6), (5, 1, 5), (8, 1, 3),
                    (10, 1, 2), (20, 0, 1), (22, 0, 1), (24, 0, 1), (26, 0, 1), (28, 0, 1),
                    (30, 0, 1))
-RUN_WALK_THRESHOLD_DAYS = 28   # breaks this long restart with run-walk [C]
+RUN_WALK_THRESHOLD_DAYS = 56   # non-injury breaks longer than this restart with run-walk [C]
+NOVICE_CONTINUOUS_RUN_MIN = 20  # cannot run this long continuously → run-walk entry [C]
 
 # --- Units -------------------------------------------------------------------
 SECONDS_PER_MINUTE = 60
@@ -150,7 +161,10 @@ REPETITION_RACE_DISTANCE_M = 1609.34  # R pace = current mile race pace
 FARTLEK_ON_ZONE = "10k"               # 'on' segments run at ~10k effort
 WALK_PACE_S_PER_KM = 600              # used only to estimate run-walk distance
 VDOT_SEARCH_RANGE = (20.0, 85.0)      # bisection bounds when inverting easy pace -> VDOT
-DEFAULT_VDOT_BY_LOAD_TIER = {"beginner": 30.0, "intermediate": 38.0, "advanced": 46.0}  # [H] placeholder until a time trial
+# No race result: prescribe by RPE/talk test only; time trial once running is consistent. [C]
+TIME_TRIAL_WEEK_WITHOUT_RACE = 3
+RESULT_DISAGREEMENT_VDOT = 1.0       # spread above which results are weighted by distance closeness [H]
+GOAL_PACE_T_MARGIN = 0.02            # race-pace reps within 2% of current T (or faster) are dosed as T [H]
 
 # --- Feasibility scaling (§5.3) [H] -----------------------------------------
 FEASIBILITY_SCALE_BOUNDS = (0.5, 1.2)  # plan_weeks / FEASIBILITY_REF_WEEKS, clamped
@@ -249,8 +263,7 @@ LR_M_EASY_BEFORE_FRACTION = 0.60   # share of the easy km placed before the M bl
 RUN_WALK_PAIN_STOP = 2             # stop if pain exceeds this (0-10 scale) [C]
 
 # --- Validator tolerances (rounding slack, not rule slack) -------------------
-SPIKE_WINDOW_DAYS = 28
 VALIDATE_KM_TOLERANCE = 0.15
 VALIDATE_SHARE_TOLERANCE = 0.01
-VALIDATE_LONG_RUN_SHARE_TOLERANCE_KM = 0.6
+VALIDATE_LONG_RUN_SHARE_TOLERANCE_KM = 0.05
 VALIDATE_RAMP_TOLERANCE_KM = 1.0

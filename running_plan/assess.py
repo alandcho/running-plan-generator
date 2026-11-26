@@ -1,6 +1,8 @@
 """Steps 2-4: fitness estimate, two-axis classification, goal feasibility."""
 from __future__ import annotations
 
+import math
+
 from . import config as C
 from .models import Assessment, Goal, Profile
 from .vdot import (BISECTION_ITERATIONS, DISTANCES_M, REPS_400M_PER_KM, fmt_duration,
@@ -32,17 +34,30 @@ def fm_penalty(weekly_km: float) -> float:
     return _interp(weekly_km, C.FM_PENALTY)
 
 
-def current_vdot(p: Profile) -> tuple[float | None, str]:
-    """Best recency-weighted VDOT from all-out races, else easy-pace estimate."""
-    best, src = None, "none"
+def current_vdot(p: Profile, goal_distance: str | None = None) -> tuple[float | None, str]:
+    """Recency-decayed VDOT from all-out races (§4.1), else an easy-pace estimate.
+
+    If results disagree by more than RESULT_DISAGREEMENT_VDOT, weight them by how close
+    their distance is to the goal distance, so a fast 5k does not set marathon paces.
+    """
+    cands = []
     for r in p.race_results:
         if not r.all_out or r.weeks_ago > C.RACE_MAX_AGE_WEEKS:
             continue
         v = vdot(DISTANCES_M[r.distance], parse_duration_min(r.time))
         stale = max(0.0, r.weeks_ago - C.RACE_FULL_WEIGHT_WEEKS)
-        v *= 1 - C.RACE_DECAY_PER_WEEK * stale
-        if best is None or v > best:
-            best, src = v, f"{r.distance} {r.time} ({r.weeks_ago:g} wk ago)"
+        cands.append((v * (1 - C.RACE_DECAY_PER_WEEK * stale), r))
+    best, src = None, "none"
+    if cands:
+        values = [v for v, _ in cands]
+        if goal_distance and max(values) - min(values) > C.RESULT_DISAGREEMENT_VDOT:
+            gd = DISTANCES_M[goal_distance]
+            weights = [1 / (1 + abs(math.log(DISTANCES_M[r.distance] / gd))) for _, r in cands]
+            best = sum(w * v for w, (v, _) in zip(weights, cands)) / sum(weights)
+            src = "distance-weighted: " + ", ".join(f"{r.distance} {r.time}" for _, r in cands)
+        else:
+            best, r = max(cands, key=lambda c: c[0])
+            src = f"{r.distance} {r.time} ({r.weeks_ago:g} wk ago)"
     if best is None and p.easy_pace_s_per_km:
         best, src = vdot_from_easy_pace(p.easy_pace_s_per_km), "estimated from easy pace (low confidence)"
     if best is not None:
@@ -59,7 +74,8 @@ def vdot_from_easy_pace(pace_s_per_km: float) -> float:
     for _ in range(BISECTION_ITERATIONS):
         mid = (lo + hi) / 2
         p = training_paces(mid)
-        if (p["E_fast"] + p["E_slow"]) / 2 > pace_s_per_km:
+        # Map to the FAST end of E: recreational runners usually run easy too fast (§4.1).
+        if p["E_fast"] > pace_s_per_km:
             lo = mid
         else:
             hi = mid
@@ -67,6 +83,7 @@ def vdot_from_easy_pace(pace_s_per_km: float) -> float:
 
 
 def age_grade_pct(distance: str, time_min: float, age: int, sex: str) -> float:
+    # Unknown sex uses the male standard, which gives the LOWER (more conservative) grade.
     std = C.AGE_GRADE_STANDARD_S[sex if sex in ("M", "F") else "M"][distance]
     factor = 1.0
     for a0, a1, rate in C.AGE_SLOWDOWN:
@@ -90,7 +107,8 @@ def load_tier(p: Profile) -> str:
     lr = _tier_from(p.longest_run_30d_km, C.LOAD_LONG_RUN_KM)
     age = _tier_from(p.training_age_years, C.LOAD_TRAINING_AGE_YR)
     # Training age may lower the tier by at most one step (§3.1).
-    return C.TIERS[min(vol, lr, age + 1, len(C.TIERS) - 1)]
+    # Volume is primary; long run and training age may each lower it by at most one step (§3.1).
+    return C.TIERS[min(vol, lr + 1, age + 1, len(C.TIERS) - 1)]
 
 
 def perf_tier(age_grade: float | None) -> str:
@@ -111,21 +129,24 @@ def feasibility(goal: Goal, v_cur: float | None, perf: str, weeks: int,
         # Marathon predictions are optimistic at low volume: compare like with like.
         pred = predict_time_min(v_cur, d) * (1 + fm_penalty(weekly_km))
         v_ref = vdot(d, pred)
-    lo, hi = C.VDOT_GAIN_RANGE[perf]
     lo_scale, hi_scale = C.FEASIBILITY_SCALE_BOUNDS
     scale = max(lo_scale, min(hi_scale, weeks / C.FEASIBILITY_REF_WEEKS))
-    delta, cap = v_goal - v_ref, hi * scale
-    realistic = predict_time_min(v_ref + cap, d)  # v_ref already carries the FM penalty
+    lo, hi = (g * scale for g in C.VDOT_GAIN_RANGE[perf])
+    mid = (lo + hi) / 2
+    delta = v_goal - v_ref
+    realistic = predict_time_min(v_ref + mid, d)  # v_ref already carries the FM penalty
     real_str = fmt_duration(realistic * C.SECONDS_PER_MINUTE)
-    if delta <= cap:
+    if delta < C.CONSERVATIVE_GOAL_DELTA_VDOT:
+        return "conservative", v_goal, real_str
+    if delta <= mid:
         return "accepted", v_goal, None
-    if delta <= cap * C.STRETCH_FACTOR:
+    if delta <= hi:
         return "stretch", v_goal, real_str
     return "unrealistic", v_goal, real_str
 
 
 def assess(p: Profile, goal: Goal, weeks: int) -> Assessment:
-    v, src = current_vdot(p)
+    v, src = current_vdot(p, goal.distance if goal.type == "race" else None)
     ag = best_age_grade(p)
     lt, pt = load_tier(p), perf_tier(ag)
     preds, paces = {}, {}

@@ -1,6 +1,6 @@
 # Running Plan Generator: Research & Algorithm Framework
 
-Status: research draft v0.1 (2026-11-26). Units are metric. Convert miles at the input boundary.
+Status: research draft v0.2 (2026-11-26), revised after an independent review (see §15). Units are metric. Convert miles at the input boundary.
 
 Each rule below is tagged with its evidence level:
 
@@ -38,7 +38,11 @@ Each rule below is tagged with its evidence level:
 | `training_age_years` | number | Years of *consistent* running (≥3×/week most weeks). |
 | `weeks_since_break` / `last_break_length_weeks` | numbers | For detraining adjustment (§4.3). |
 | `age`, `sex` | | For age-grading (§3) and recovery (masters). |
-| `injury_history` | list + current pain flag | Current pain → screen out or route to medical (§12). |
+| `injury_last_12_months`, `bone_stress_injury_ever` | bools | Prior injury is the most consistent injury risk factor [E: Saragiotto 2014]. Makes the load rules more conservative (§6.2). |
+| `current_pain`, `injury_cleared` | bools | Current pain or an uncleared injury → blocking screen (§12). |
+| `health_screen` | PAR-Q+ style answers | Chest pain, fainting, known cardiac/metabolic/renal disease, medications. Any "yes" → blocking until a clinician clears (§12). |
+| `energy_availability_screen` | optional answers | No periods ≥ 3 months, prior bone-stress injury, disordered eating → refer (RED-S, §12). |
+| `can_run_continuous_min` | number | Minutes of continuous easy running possible today. < 20 → run-walk entry (§7.7). |
 | `easy_pace_s_per_km`, `hr_max`, `hr_rest` | optional | Fallback when there are no race results; enables HR zones. |
 
 ### 2.2 Goal
@@ -83,8 +87,10 @@ Because of principle 1.1, **classify along two axes** instead of using one label
 | **Intermediate** | 25–55 km | 10–21 km | 1–3 yr |
 | **Advanced** | > 55 km | > 21 km | > 3 yr |
 
-Rule: `load_tier = min(tier by volume, tier by long run, tier by training age + 1)` [H].
-Taking the **minimum** is deliberate: injury risk follows the weakest link. The training-age term can only lower the tier by one step, so a 6-month runner already at 50 km/wk is still capped at Intermediate.
+Rule: `load_tier = min(tier by volume, tier by long run + 1, tier by training age + 1)` [H].
+Taking the **minimum** is deliberate: injury risk follows the weakest link. Volume is the primary axis. The long-run and training-age terms can each lower the tier by **at most one step**:
+- A 6-month runner already at 50 km/wk is capped at Intermediate.
+- A 5k/10k specialist at 80 km/wk whose long runs are 18 km stays Advanced, not Intermediate.
 
 ### 3.2 Performance tier: drives workout complexity and intensity dose
 
@@ -120,8 +126,8 @@ VDOT    = VO2 / %max
 Choosing which result to use:
 1. Only include all-out races or time trials on roughly flat courses. Training runs underestimate fitness.
 2. Weight by recency: full weight if ≤ 8 weeks old. Then decay it (§4.3) or drop it after 12 months [H].
-3. Prefer distances closest to the goal distance when results disagree. An HM result predicts FM better than a 5k result does.
-4. **No usable race:** schedule a time trial in week 1 or 2 (5k for most runners; 3k or a 30-minute test for beginners). Until then, estimate from easy pace: `VDOT_est ≈ VDOT whose E-pace midpoint = user's easy pace`, and lower confidence [H].
+3. When results disagree by more than 1 VDOT (`RESULT_DISAGREEMENT_VDOT`), **weight by closeness to the goal distance** instead of taking the maximum. An HM result predicts FM better than a fast 5k does. Taking the maximum lets a short-distance PB set marathon paces.
+4. **No usable race:** prescribe by **RPE and talk test only**, not by estimated paces. Schedule a time trial in **week 3–4**, once running is consistent (5k for most runners; 3k for beginners). If the runner reports a typical easy pace, map it to the **fast end** of the E range (`VDOT whose E_fast = easy pace`). Recreational runners usually run easy too fast, so matching the midpoint would inflate VDOT [H].
 
 ### 4.2 Race-time prediction and the marathon problem [E]
 
@@ -168,7 +174,8 @@ Validation: Daniels' published VDOT 40 row gives 10k 50:03, FM 3:49:45, T 5:06 a
 
 **Which VDOT to use for each pace [C]:**
 - E, T, I and R use **current** VDOT. Training at goal fitness before having it is the most common cause of overcooked plans.
-- **Goal race pace** (HM or FM pace work) uses the *goal* time, but only if the goal passes the feasibility check (§5.3). Otherwise use the predicted time.
+- **Goal race pace is not used from day one.** Race-pace work starts at the **predicted** race pace from current VDOT. It moves toward goal pace only as recalibrated VDOT (tune-ups and time trials) supports it. A goal that needs +1.3 VDOT cannot be trained at goal pace in week 8 if the runner has not gained that fitness yet.
+- **Dose by the zone the pace actually falls in.** If a race-pace rep is within `GOAL_PACE_T_MARGIN` (2%) of current T pace, or faster, it counts against the **T cap** (10% of weekly volume), not the race-pace cap. Example: goal HM pace 5:07/km against current T 5:05/km is threshold work.
 - Recalculate VDOT after each tune-up race or time trial. Move paces up by **at most +1 VDOT per 3–4 weeks**, even if a race suggests more [H, after Daniels].
 
 ---
@@ -206,9 +213,18 @@ If the runner is not at least at Intermediate base volume for the goal distance,
 | 5k | 6 wk | 8–12 wk | |
 | 10k | 8 wk | 10–12 wk | |
 | HM | 10 wk | 12–16 wk | Beginner should start at ≥ 15 km/wk and long run ≥ 6 km |
-| FM | 12 wk | 16–20 wk | Beginner should start at ≥ 30 km/wk and long run ≥ 13 km. Otherwise prepend an aerobic_base block. |
+| FM | 12 wk | 16–20 wk | Beginner should start at ≥ 40 km/wk and long run ≥ 16 km. Otherwise prepend an aerobic_base block. |
 
 If time < minimum: offer options instead of compressing silently. Choices are (a) a later race, (b) a "finish" objective with a shorter plan, or (c) a capped plan with a warning.
+
+**Reachability check [C/H].** Races are exempt from the spike rule (§6.4), so a plan must prove it can build a long run that makes the race reasonable. Simulate the volume and long-run curves under *all* caps (ramp, frequency, share, spike, time). Then require a projected peak long run of at least `MIN_PEAK_LONG_RUN`:
+
+| Goal | Projected peak long run |
+|---|---|
+| HM | ≥ 16 km or ≥ 1:45 |
+| FM | ≥ 26 km or ≥ 2:45 |
+
+If the check fails, the plan is blocked with options: a later race, more run days, or an aerobic_base block first. Example: a 30 km/wk beginner on 4 days peaks at 40 km/wk with a 16 km long run. The review found such a runner would have been sent into a 42.2 km race (a 260% session spike).
 
 ### 5.3 Goal feasibility check [H]
 
@@ -221,9 +237,13 @@ Rough achievable gain over one 12–16 week block, assuming the plan is followed
 | Intermediate | +1 to +3 |
 | Advanced | +0.5 to +1.5 |
 
-- Within range: accept.
-- Up to 1.5× range: accept with a "stretch goal" warning.
-- Beyond that: propose the realistic target, explain why, and let the user override (record the override).
+Thresholds use the range scaled by plan length:
+- ΔVDOT ≤ range **midpoint**: accepted.
+- Midpoint to **top** of range: "stretch goal" warning.
+- Beyond the top: unrealistic. Propose the realistic target (current + midpoint gain), explain why, and let the user override (record the override).
+- ΔVDOT < −1 (`CONSERVATIVE_GOAL_DELTA_VDOT`): flag as a "conservative goal" and offer the predicted time as an alternative.
+
+Open question: the gain range should probably also depend on volume headroom and training age, not only age-grade (§12).
 
 Plans built backward from impossible goals are the biggest real-world failure mode.
 
@@ -250,21 +270,32 @@ Typical range, km/week:
 | HM | 30–40 | 45–65 | 70–110 |
 | FM | 40–55 | 55–80 | 85–130 |
 
-`peak = clamp(target_for_tier, current × 1.0, current × 1.5)` [H]. Two further caps apply:
-- **Frequency cap:** `peak ≤ days_per_week × max_sensible_run_avg`, where the average is 10 km for Beginner, 13 km for Intermediate and 16 km for Advanced [H].
+`peak = max(start, min(target_for_tier, start × 1.5, frequency_cap, time_cap))` [H]:
+- **Target for tier:** the midpoint of the range above.
+- **Frequency cap:** `days_per_week × max_sensible_run_avg`, where the average is 10 km for Beginner, 13 km for Intermediate and 16 km for Advanced [H].
 - **Time cap:** the weekday maximum and the long-run maximum.
+
+The outer `max(start, …)` means a cap **never prescribes a cut** in current volume (outside maintenance and recovery goals). If current volume already exceeds the frequency cap, hold it and warn.
 
 ### 6.2 Weekly progression
 
 What the evidence says [E]:
-- The "10% rule" has **little direct support**. In novice runners (Nielsen 2014, n = 874), more than 30% progression over 2 weeks was associated with more distance-related injuries than less than 10% (HR 1.59, borderline significance). No difference was found between 10% and roughly 24%.
+- The "10% rule" has **little direct support**.
+  - Buist 2008 (GRONORUN randomized trial, n = 532 novices): a graded 10%-rule programme gave the same injury rate as a standard programme (20.8% vs 20.3%).
+  - Nielsen 2014 (cohort, n = 874 novices, groups < 10% / 10–30% / > 30%): more than 30% progression over 2 weeks was associated with more *distance-related* injuries than less than 10% (HR 1.59, 95% CI 0.96–2.66, borderline).
 - Large GPS cohort (Frandsen 2025, n ≈ 5,200, 588k sessions): **week-to-week change was not associated with injury**, but single-session spikes were (§6.4).
 - The acute:chronic workload ratio (ACWR) has been heavily criticized on statistical grounds (Impellizzeri 2020). **Do not build the engine on ACWR.**
 
 Framework rule [H]:
-- Average ramp: Beginner +5–8% per week, Intermediate +8–10%, Advanced +10%. Never exceed **+20% per week** or **+30% across 2 weeks**.
+- Average ramp: Beginner +5–8% per week, Intermediate +8–10%, Advanced +10%. Never exceed **+20% per week** [H] or **+30% across 2 weeks** [E→H, Nielsen 2014].
+- All ramp and spike baselines use **logged actual runs**, not planned ones (§10).
+- **Injury-history modifier** [E→H]: an injury in the last 12 months, or any bone-stress injury ever, means:
+  - ramp rate one tier lower
+  - 2:1 cycles
+  - `SPIKE_LIMIT_AFTER_INJURY` = 1.05 instead of 1.10
+- Cross-training replaces aerobic minutes but **never counts** toward running ramp or spike baselines.
 - A beginner adding a run day counts as a ramp week. Do not add a day and distance in the same week.
-- Step loading: **3 build weeks, then 1 down week at −20 to −30%**. Masters (50+) and beginners use **2:1** [C].
+- Step loading: **3 build weeks, then 1 down week at −20 to −30%** [C]. Masters (50+), beginners and runners with recent injury use **2:1** [H]. Many novice plans use 3:1, so this is a cautious choice, not consensus.
 - After reaching peak, hold it (±5%) instead of continuing to climb.
 
 ### 6.3 Intensity distribution [E/C]
@@ -280,10 +311,16 @@ Per-session dose caps (Daniels) [C]:
 | I | ≤ min(8% of weekly volume, 10 km); reps 2–5 min |
 | R | ≤ min(5% of weekly volume, 8 km); reps ≤ 2 min, full recovery |
 | M | ≤ min(20% of weekly volume, 29 km) |
+| HM pace | ≤ min(20%, 16 km) [H]; dosed as T if within 2% of current T (§4.4) |
+| 10k pace | ≤ min(12%, 9 km) [H] |
+| 5k pace | ≤ min(8%, 10 km) [H] (same as I) |
 
 ### 6.4 Long run [E/C]
 
-- **Spike rule [E]:** no single run should exceed **110% of the longest run in the previous 30 days**. Frandsen 2025 found injury rates were 64% higher for 10–30% spikes and 128% higher for spikes over 100%. Apply this to *every* run, not just the long run.
+- **Spike rule [E]:** no single run should exceed **110% of the longest run in the previous 30 days** (`SPIKE_WINDOW_DAYS` = 30). Frandsen 2025 found injury rates were 64% higher for 10–30% spikes and 128% higher for spikes over 100%.
+  - Apply it to *every* run, not just the long run.
+  - **The race itself is exempt**; the reachability check (§5.2) covers it.
+  - With no logged history, seed the window with `longest_run_30d_km`, or with the longest continuous run for novices.
 - Share of the week [C/H]: the long run is ≤ 30% of weekly volume by default. With few run days, a 30% long run would be *shorter than an average run*, so the cap scales with frequency: 2 days 55%, 3 days 45%, 4 days 40%, 5 days 35%, 6–7 days 30% (`LONG_RUN_SHARE`). The plan warns whenever the share is above 30%.
 - Time cap [C]: about 2:30 for most runners, 3:00 for beginner and intermediate marathoners (beyond that the fatigue cost outweighs the benefit).
 - Peak long-run targets, km:
@@ -309,7 +346,7 @@ Number of quality sessions, counting the long run, by tier and days per week [C/
 
 Placement:
 1. Put the long run on `long_run_day`.
-2. Put quality 1 about 3 days before the long run (e.g. Tue for a Sun long run). Put quality 2 at least 48 h after quality 1 and at least 48 h before the long run.
+2. Put quality 1 midweek, about 3 days before the long run (Thu for a Sun long run, so it is 4 days after the previous long run). Put quality 2 at least 48 h after quality 1 and at least 48 h before the long run (e.g. Tue + Thu for a Sun long run).
 3. No hard session the day before the long run. The day after the long run is rest or easy.
 4. Fill the remaining days with easy runs. Rest days go where the user is unavailable, then after the long run.
 5. Distribute volume: long run first (§6.4), then quality-day totals (warm-up and cool-down included), then spread the rest across easy days. Minimum easy run is 4 km or 25 min [H]. If the remaining volume cannot fit within caps, lower the weekly target. Never push the long run above its cap.
@@ -331,22 +368,22 @@ Placement:
 
 ### 7.2 Speed (without a fixed race)
 
-More I and R work. Allow up to 2 quality days plus the long run for Intermediate and above. Long run is moderate (≤ 25% of the week). Run a 5k time trial every 4–6 weeks to recalibrate VDOT. Volume stays roughly flat (±10%).
+More I and R work. Allow up to 2 quality days plus the long run for Intermediate and above. The long run is moderate: ≤ 25% of the week (`SPEED_LONG_RUN_SHARE`). Run a 5k time trial every 4–6 weeks to recalibrate VDOT. Volume stays roughly flat (±10%).
 
 ### 7.3 Aerobic endurance (base building)
 
-The goal is to reach the target volume. About 90% of the running is E. Run strides 2× per week. Do one T session per week after week 3 (Intermediate and above). Use hill sprints for robustness. Progress per §6.2 until the target is reached, then hold for at least 3 weeks. This is the default "pre-block" when a race plan would start below the minimum base.
+The goal is to reach the target volume. About 90% of the running is E (`AEROBIC_BASE_MIN_EASY_SHARE`). Run strides 2× per week. Do one T session per week after week 3 (Intermediate and above). Use hill sprints for robustness. Progress per §6.2 until the target is reached, then hold for at least 3 weeks. This is the default "pre-block" when a race plan would start below the minimum base.
 
-### 7.4 Maintenance [E]
+### 7.4 Maintenance [E→H]
 
-Detraining research: VO2max and endurance hold with **volume and frequency cut by one-third to two-thirds, provided intensity is maintained**. Frequency is the least safe thing to cut. Rule [H]:
+Reduced-training research (Spiering 2021 review, built largely on Hickson's 1980s studies): endurance holds for **up to 15 weeks on as few as 2 sessions/week, or with volume per session cut 33–66%, provided intensity is maintained**. Caveats: the subjects were mostly recently trained non-runners, and the authors say there are not enough data for athletes. Keeping ≥ 3 runs/week is an [H] choice for *tissue tolerance* (impact loading), not for aerobic fitness. Rule [H]:
 - Volume 50–70% of the previous normal; keep at least 3 runs per week.
 - Keep **1 quality session** per week (rotate T and I) and a **long run at about 60–70% of the previous length**.
 - No progression. Optional 4-weekly fitness check (time trial or fixed-HR run).
 
 ### 7.5 Recovery (post-race reverse taper) [C/H]
 
-- Days of **no hard running** ≈ race distance in km ÷ 3 (5k ≈ 2 days, HM ≈ 7 days, FM ≈ 14 days), after the old rule of "one easy day per mile raced".
+- Days of **no hard running** ≈ race distance in km ÷ 3 (5k ≈ 2 days, HM ≈ 7 days, FM ≈ 14 days). This is a *softened* version of the old "one easy day per mile raced" rule, which would give 26 days for FM [H].
 - FM: 3–7 days off or cross-train, then E running with volume over 3 weeks at 30% → 50% → 70%.
 - HM: about 2 days off, then 2 weeks at 50% → 75%.
 - Then hand off to the next goal.
@@ -354,12 +391,19 @@ Detraining research: VO2max and endurance hold with **volume and frequency cut b
 ### 7.6 Return to running (after a break or cleared injury)
 
 - Apply §4.3 to VDOT and starting volume.
-- Break ≥ 4 weeks or injury: start with **run-walk** (e.g. 1 min run / 1 min walk × 10–15, progressing to continuous 30 min), at most 1 progression step every 2–3 sessions, and only if pain stays ≤ 2/10 during the run and the next morning [C].
+- **Run-walk entry** (`RUN_WALK_LADDER`: 1 min run / 1 min walk × 10, progressing to continuous 30 min) is used for:
+  - returns from injury, especially bone stress
+  - breaks longer than 8 weeks (`RUN_WALK_THRESHOLD_DAYS` = 56)
+  - anyone who cannot run 20 min continuously
+
+  Advance at most one step every 2 sessions, and only if pain stays ≤ 2/10 during the run and the next morning [C].
+- **Non-injury breaks of 15–56 days:** restart *continuous* easy running at the §4.3 volume, with no run-walk.
 - No quality sessions until 3 weeks of pain-free continuous running.
 
-### 7.7 General fitness
+### 7.7 General fitness and true novices
 
-3–4 days per week, 20–45 min, mostly E with strides. Optional fartlek once per week after week 4. Progression per §6.2 with a Beginner ramp.
+- **Can run ≥ 20 min continuously:** 3–4 days per week, 20–45 min, mostly E with strides. Optional fartlek once per week after week 4. Progression per §6.2 with a Beginner ramp.
+- **Cannot run 20 min continuously** (`NOVICE_CONTINUOUS_RUN_MIN`): start on the run-walk ladder (§7.6) as a couch-to-5k entry, 3 sessions/week, prescribed in **minutes and RPE/talk test only**, with no paces. After continuous 30 min, switch to the general-fitness plan. Offer a 3k time trial once 3 weeks of continuous running are logged.
 
 ---
 
@@ -402,6 +446,21 @@ Standard warm-up and cool-down for quality: 10–15 min E (+ strides before I/R)
 - **Treadmill:** set 1% incline to approximate outdoor cost [C].
 - **Altitude > 1,500 m:** prescribe by effort for the first 1–2 weeks [C].
 
+### 8.4 What every daily prescription contains
+
+| Field | Example |
+|---|---|
+| Type + purpose | "Tempo: raise lactate threshold" |
+| Structure | WU · main set (reps × distance @ zone, recovery) · CD |
+| Distance **and** estimated duration | 8.9 km, ~51 min (beginners: minutes first) |
+| Pace target per segment | T 5:05/km; E 6:07–6:43/km |
+| Effort fallback | RPE 6–7, "a few words" talk test; HR range if HRmax is measured |
+| Conditions override | Heat, hills or trail → run by effort, not pace (§8.3) |
+| Fuelling | Runs > 90 min: carbohydrate during the run |
+| Stop rules | Pain > 3/10 or altered gait → stop; red flags (§12) |
+
+Weekly summary: total km, total time, hard minutes, easy share, phase, and warnings (e.g. long-run share > 30%). Race week adds a **race-day pacing plan**: even splits at target pace and when to reassess.
+
 ---
 
 ## 9. The algorithm (end-to-end)
@@ -412,33 +471,40 @@ OUTPUT: plan = weeks[] → days[] → workout{type, km|min, paces, zone, rpe, no
 (Names in CAPS are constants in running_plan/config.py — see §14.)
 
 1. VALIDATE & SCREEN
-   - Current pain / injury not cleared → blocking issue; route to professional / return_to_running.
-   - Missing race result → time trial in week 1–2 (TIME_TRIAL_DISTANCE_BY_TIER);
-     VDOT from easy pace, else DEFAULT_VDOT_BY_LOAD_TIER (paces provisional).
+   - Health screen "yes", RED-S screen "yes", current pain, or injury not cleared → blocking.
+   - can_run_continuous_min < NOVICE_CONTINUOUS_RUN_MIN → run-walk entry (§7.7).
+   - Missing race result → RPE/talk-test prescription; time trial in week 3–4
+     (TIME_TRIAL_DISTANCE_BY_TIER). Easy-pace estimate maps to E_fast (low confidence).
 
 2. FITNESS
    vdot_mult, volume_restart = DETRAINING[days_off]
-   VDOT_cur = max over races of vdot(race) × (1 − RACE_DECAY_PER_WEEK × weeks_past_full_weight)
-              × vdot_mult
+   VDOT_cur = recency-decayed race VDOTs; if they spread > RESULT_DISAGREEMENT_VDOT,
+              weight by closeness to goal distance (else take the best) × vdot_mult
+   race-pace targets start at predicted pace and move toward goal pace with recalibrated VDOT;
+   reps within GOAL_PACE_T_MARGIN of current T (or faster) are dosed against the T cap
    paces    = training_paces(VDOT_cur)            # *_FRACTION_OF_VDOT
    FM prediction × (1 + FM_PENALTY(weekly_km))
 
 3. CLASSIFY
-   load_tier = min(tier(weekly_km, LOAD_VOLUME_KM), tier(longest_30d, LOAD_LONG_RUN_KM),
+   load_tier = min(tier(weekly_km, LOAD_VOLUME_KM), tier(longest_30d, LOAD_LONG_RUN_KM) + 1,
                    tier(training_age, LOAD_TRAINING_AGE_YR) + 1)
+   injury in last 12 mo or bone-stress ever → ramp one tier lower, 2:1, SPIKE_LIMIT_AFTER_INJURY
    perf_tier = tier(age_grade_pct, PERF_AGE_GRADE)
 
 4. FEASIBILITY
    plan_weeks ≥ MIN_WEEKS[goal]; current base ≥ MIN_BASE[goal]   else → options, no silent compression
-   ΔVDOT = VDOT(goal) − VDOT_cur;  cap = VDOT_GAIN_RANGE[perf].hi × clamp(weeks / FEASIBILITY_REF_WEEKS,
-                                                               FEASIBILITY_SCALE_BOUNDS)
-   ΔVDOT ≤ cap → accepted;  ≤ cap × STRETCH_FACTOR → stretch;  else unrealistic (propose target)
+   ΔVDOT = VDOT(goal) − VDOT_cur
+   (lo, hi) = VDOT_GAIN_RANGE[perf] × clamp(weeks / FEASIBILITY_REF_WEEKS, FEASIBILITY_SCALE_BOUNDS)
+   mid = (lo + hi) / 2
+   ΔVDOT ≤ mid → accepted;  ≤ top → stretch;  > top → unrealistic (propose current + mid)
+   ΔVDOT < CONSERVATIVE_GOAL_DELTA_VDOT → "conservative goal" note
+   REACHABILITY: simulate step 5 under all caps; peak LR ≥ MIN_PEAK_LONG_RUN[goal] else block
 
 5. MACRO PLAN
    taper  = TAPER[goal] (fractions of peak);  non-taper weeks split by PHASE_SPLIT[goal]
    start  = weekly_km × volume_restart
-   peak   = clamp(mid(PEAK_VOLUME_KM[goal][tier]), start, start × PEAK_MAX_GROWTH)
-            ∧ days × AVG_RUN_CAP_KM[tier]
+   peak   = max(start, min(mid(PEAK_VOLUME_KM[goal][tier]), start × PEAK_MAX_GROWTH,
+                           days × AVG_RUN_CAP_KM[tier]))          # caps never cut current volume
    cycle  = 2:1 if beginner or age ≥ MASTERS_AGE else 3:1
    build week:  vol = min(peak, last_build × (1 + RAMP_RATE[tier]))   (hold when a run day is added)
    down week:   vol = last_build × (1 − DOWN_WEEK_CUT)
@@ -477,6 +543,8 @@ Weekly check-in inputs: completion per session, session RPE, pain (0–10 with l
 
 | Signal | Action [C/H] |
 |---|---|
+| **Bone-stress red flags**: focal bony tenderness, pain at rest or at night, pain on hopping | **Stop running and refer.** Do not substitute easy running |
+| Chest pain, fainting, palpitations, unusual breathlessness | **Stop and seek medical care.** Plan paused |
 | Pain ≥ 3/10, or pain that alters gait or worsens during a run | Stop progression; replace quality with E or cross-training; 2+ days → suggest a professional |
 | Missed ≤ 3 days | Continue; don't make up the missed km |
 | Missed 4–10 days | Repeat the last completed week |
@@ -487,64 +555,98 @@ Weekly check-in inputs: completion per session, session RPE, pain (0–10 with l
 | Race or time-trial result | Recompute VDOT (cap of +1 per 3–4 weeks, §4.4); re-run the feasibility check |
 | Life stress or poor sleep (≤ 2/5) for a week | Swap the next quality session for E; hold volume |
 
+Implementation rules for the loop:
+- **Consistently** means ≥ 2 of the last 3 sessions of that type (`ADAPT_CONSISTENT_OF_LAST`).
+- **Baselines from actuals.** Spike, ramp and long-run baselines are recomputed from logged runs, not planned ones.
+- **Fixed race date.** "Repeat a week" or "insert a down week" pushes everything back, so the plan must compress. Compression order:
+  1. Drop Build weeks first.
+  2. Then drop Base weeks.
+  3. Never shorten the taper.
+  4. Never compress Specific below 2 weeks.
+
+  After any shift, **re-run the feasibility and reachability checks**. If they fail, offer options (finish objective, revised target, later race).
+
 ---
 
 ## 11. Worked example
 
-**Input:** 4-week average 40 km/wk, longest run in 30 days 16 km, 4 runs/week, 2 years consistent, age 34. Recent 10k 50:00 (6 weeks ago). Goal: HM in 12 weeks, target 1:48. Runs Tue/Thu/Sat/Sun, long run Sunday.
+Computed by hand from the rules above. It will be replaced by generator output and kept as a regression test (review finding M2).
 
-**Step 2 – Fitness:** VDOT 40.0 → HM equivalent 1:50:52. Paces: E 6:07–6:44, T 5:06, I 4:41/km.
-**Step 3 – Classify:** volume 40 → Intermediate. Long run 16 → Intermediate. Training age 2 yr → Intermediate. Load tier = Intermediate. Age-grade of 50:00 at 34 M ≈ 52% → performance tier Intermediate.
-**Step 4 – Feasibility:** 1:48 needs VDOT 41.3 → ΔVDOT +1.3, inside the Intermediate range (+1 to +3). Accept. 12 weeks ≥ HM minimum of 10.
-**Step 5 – Macro:** Base wks 1–3, Build 4–7, Specific 8–10, Taper 11–12. Peak target 52 km (Intermediate HM range 45–65; frequency cap 4 × 13 = 52).
+**Input:**
+- 4-week average 40 km/wk; longest run in 30 days 16 km; 4 runs/week; 2 years consistent; age 34, M.
+- Recent 10k 50:00 (6 weeks ago).
+- Goal: HM in 12 weeks, target 1:48.
+- Mon/Wed/Fri unavailable, so the runner runs Tue/Thu/Sat/Sun, long run Sunday.
 
-| Wk | Phase | Volume | Long run | Notes |
+**Step 2 – Fitness:** VDOT 40.0 → HM equivalent 1:50:52 (5:15/km). Paces: E 6:07–6:43, T 5:05, I 4:41/km.
+**Step 3 – Classify:** volume 40 → Intermediate; long run 16 → Intermediate; training age 2 yr → Intermediate. Load tier = Intermediate. Age-grade ≈ 52.8% → performance tier Intermediate.
+**Step 4 – Feasibility:** 1:48 needs VDOT 41.3, so ΔVDOT = +1.3. The Intermediate range (+1 to +3) scaled by 12/14 weeks is +0.86 to +2.57, midpoint +1.71. +1.3 ≤ midpoint → **accepted**. Reachability: projected peak long run 20.5 km ≥ 16 km ✓.
+**Step 5 – Macro:** 10 non-taper weeks split 35/30/35 (rounding half up) → Base wks 1–4, Build 5–6, Specific 7–10, Taper 11, Race 12. Peak = max(40, min(55 [tier midpoint], 60 [1.5×], 52 [4 days × 13])) = **52 km**. Ramp 9%; 3:1 cycle → down weeks 4 and 8. Peak long run aim = 19 + 0.4 × (24 − 19) = 21 km. Long-run share cap at 4 days = 40%.
+
+| Wk | Phase | Volume | Long run (share) | Thu quality | Notes |
+|---|---|---|---|---|---|
+| 1 | Base | 40 | 16 (40%) | Easy + hill sprints | strides 2× |
+| 2 | Base | 43.5 | 17 (39%) | Easy + hill sprints | LR +6%, capped by share |
+| 3 | Base | 47.5 | 18.5 (39%) | 2 × 1.6 km @ T | |
+| 4 | Base (down) | 37 | 13 | **5k time trial** → recalibrate VDOT | −22% |
+| 5 | Build | 52 | 20 (39%) | 3 × 1.6 km @ T | +9% vs wk 3; LR ≤ 1.1 × 18.5 |
+| 6 | Build | 52 | 20.5 LR-prog | 25 min tempo @ T | see detail below |
+| 7 | Specific | 52 | 20.5, last 3 km @ HM pace | 2 × 4 km @ HM pace | |
+| 8 | Specific (down) | 40.5 | 14.5 | **10k tune-up race or 5k TT** | recalibrates race pace |
+| 9 | Specific | 52 | 20.5 | 2 × 5 km @ HM pace | |
+| 10 | Specific | 52 | 20.5, last ~4.5 km @ HM pace | 2 × 3 km @ HM pace | longest run 2 weeks out |
+| 11 | Taper | 39 (75%) | 13 | 2 × 2.5 km @ HM pace | |
+| 12 | Race | ~22 + race | race (Sun) | short sharpener Thu | target 26 km under-fills: race-eve run ≤ 4 km |
+
+**HM pace used** follows §4.4. Weeks 7–8 use the **predicted** pace, 5:15/km. From week 9 the pace moves toward the goal of 5:07/km only as the week-4 and week-8 results support it, e.g. VDOT 40.6 → about 5:11/km. At 5:15/km the reps are 3.3% slower than T, so they count against the HM-pace cap (20% of the week = 10.4 km). If the goal pace were run now (5:07/km, within 2% of T), the reps would count against the T cap (5.2 km).
+
+Checks:
+- **Spike:** every long run is ≤ 110% of the 30-day maximum (16 → 17 → 18.5 → 20 = +6%, +9%, +8%).
+- **Ramp:** ≤ +9% per build week and +19% over two build weeks.
+- **Share:** ≤ 40%.
+- **Hard budget:** within the 20% hard-time budget every week.
+- ⚠ The plan warns that the long run is about 39% of volume (above the 30% default) and suggests a 5th short easy day as the alternative.
+
+**Week 6 detail (Build, 52 km, paces from VDOT 40 unless the week-4 TT changed them):**
+
+| Day | Workout | Distance | Est. time | Pace / target |
 |---|---|---|---|---|
-| 1 | Base | 40 | 16 | strides 2× |
-| 2 | Base | 43 | 17 | |
-| 3 | Base | 46 | 18.5 | first T-cruise |
-| 4 | Down | 36 | 14 | 5k TT → recalibrate |
-| 5 | Build | 47 | 19 | |
-| 6 | Build | 50 | 20 | |
-| 7 | Build | 52 | 21 | LR-prog |
-| 8 | Down | 41 | 15 | 10k tune-up race or TT |
-| 9 | Specific | 52 | 21 | LR-HM (last 6 km @ goal pace) |
-| 10 | Specific | 50 | 18 | 3 × 4 km @ HM pace |
-| 11 | Taper | 38 | 14 | volume about 75% of peak |
-| 12 | Race | ~18 + race | race | 2 short sharpening runs |
+| Mon | Rest / strength (optional) | — | — | — |
+| Tue | Easy + 6 × 20 s strides | 12.5 km | ~1:26 | E 6:07–6:43/km (RPE 2–4, full sentences) |
+| Wed | Rest | — | — | — |
+| Thu | **Tempo**: 2 km WU · 25 min @ T · 2 km CD | 8.9 km | ~51 min | T **5:05/km** (RPE 6–7, a few words). T = 4.9 km ≤ 10% cap |
+| Fri | Rest / strength (optional) | — | — | — |
+| Sat | Easy | 10 km | ~64 min | E, keep it truly easy before the long run |
+| Sun | **Progression long run**: 16.4 km @ E, last 4.1 km building to M | 20.5 km | ~2:07 | E → M 5:26/km. ≤ 2:30 cap; 20.5 ≤ 1.1 × 20 |
 
-Check: every long run is ≤ 110% of the prior 30-day maximum (16 → 17 is +6%; 17 → 18.5 is +9%; 18.5 → 19 is +3% …). The ramp is ≤ 10% per week, with down weeks at −20–22%.
-
-⚠ Rule conflict the engine must surface: with only 4 days per week, the long run is **≈ 38–40% of weekly volume**, above the 30% default (§6.4). The low-frequency exception allows it with a warning. The engine should also offer the alternative: add a 5th short easy day, which brings the long run to about 32%.
-
-**Week 6 detail (Build, 50 km, VDOT still 40 unless the week-4 TT changed it):**
-
-| Day | Workout | Distance | Pace / target |
-|---|---|---|---|
-| Mon | Rest | n/a | n/a |
-| Tue | **T-cruise**: 3 km WU + 3 × 1.6 km @ T (1 min jog) + 3 km CD | 11 km | T **5:06/km** (RPE 6–7). T total 4.8 km ≤ 10% cap |
-| Wed | Rest or cross-train / strength | n/a | n/a |
-| Thu | E + 6 × 20 s strides | 10 km | E 6:07–6:44/km |
-| Fri | Rest / strength | n/a | n/a |
-| Sat | E | 9 km | E 6:20–6:44/km (keep it easy before the long run) |
-| Sun | **LR** | 20 km | E 6:07–6:44/km, ≈ 2:10 (≤ 2:30 cap); 20 ≤ 1.1 × 19 |
-
-Easy share by time ≈ 92% (T work about 25 of about 316 min). Weekly total 50 km. HM goal pace for later Specific weeks: **5:07/km** (1:48).
+Week total about 52 km, about 5:28. Hard time is about 47 of 328 min, so the **easy share is about 86%** (≥ 80% ✓). Fuelling: the long run is over 90 min, so take a carbohydrate source (§8.4).
 
 ---
 
 ## 12. Safety, scope and limitations
 
-- **Not medical advice.** Screen for current pain, recent injury, and cardiac or medical red flags. Route those users to a professional, or to the return-to-running playbook only after clearance.
+- **Not medical advice.** v1 screening is blocking: no plan is produced until each item is resolved.
+  - **Health screen (PAR-Q+ style):** chest pain at rest or on exertion, fainting or dizziness, known heart, metabolic or renal disease, or a medication affecting heart rate or blood pressure. Any "yes" → see a clinician first.
+  - **Current pain or uncleared injury** → see a professional. After clearance, use the return-to-running playbook (§7.6).
+  - **Low energy availability (RED-S) screen** (offered to all, essential for women): no periods for ≥ 3 months, prior bone-stress injury, disordered eating or restrictive dieting. Any "yes" → refer to a clinician; do not build a volume-progression plan.
+- **Stop rules printed on every plan:**
+  - Chest pain, fainting, palpitations or unusual breathlessness → stop and seek care.
+  - Bone-stress red flags (focal bony tenderness, pain at rest or at night, pain on hopping) → stop running and refer.
+- **HR zones:** `220 − age` has an error of about ±10–12 bpm. Use a measured HRmax or prefer RPE and the talk test, especially for beginners.
 - Out of scope for v1: ultras, multi-sport, pregnancy and postpartum, youth (< 16), doubles.
 - Treat **all [H] thresholds as configuration**, not constants. Log plan outcomes (completion, injuries, race result vs. prediction) so they can be tuned.
-- Recommended add-ons that were **not researched in this pass**: strength training (commonly cited for running economy and injury resilience), mobility, footwear, fuelling for long runs, and sleep. Treat these as open items.
+- v1 includes three add-ons whose evidence is **not yet verified here**:
+  - **Strength training:** 2×/week, optional, placed on hard days (after the run) or the day after the long run, never the day before a quality session or the long run. The reviewer cites moderate evidence for running economy (Blagrove 2018) and weak evidence for running-specific injury prevention (Toresdahl 2020).
+  - **Fuelling note:** for runs over 90 min and all FM long runs.
+  - **Cross-training:** replaces easy minutes but is excluded from ramp and spike baselines.
+- Deferred to later versions: heat adjustment beyond effort-based guidance, HRV/readiness signals, menstrual-cycle adjustments, surface, and masters-specific recovery spacing.
 
 ### Open research questions for the next pass
 
 1. A validated rule for the beginner→intermediate cut-off (or a decision to keep the two-axis approach).
 2. Calibrating the marathon penalty (§4.2) against the Vickers & Vertosick model coefficients.
-3. Evidence for strength training and its scheduling relative to quality days.
+3. Verify strength-training evidence (Blagrove 2018; Toresdahl 2020) and its scheduling relative to quality days.
+8. Should feasibility gain ranges depend on volume headroom and training age as well as age-grade?
 4. Masters-specific adjustments (recovery days, 2:1 cycles), based on studies rather than coaching practice.
 5. Female-specific considerations (menstrual cycle, RED-S screening).
 6. HR-based zone accuracy vs. pace-based zones for beginners.
@@ -562,6 +664,8 @@ Physiology and pace model
 Load and injury
 - Frandsen et al. (2025), *How much running is too much? Identifying high-risk running sessions in a 5200-person cohort study*, BJSM: [PMC12421110](https://pmc.ncbi.nlm.nih.gov/articles/PMC12421110); [BJSM blog](https://blogs.bmj.com/bjsm/?p=11751).
 - Nielsen et al. (2014), *Excessive progression in weekly running distance and risk of running-related injuries*, JOSPT: [AAU record](https://vbn.aau.dk/da/publications/excessive-progression-in-weekly-running-distance-and-risk-of-runn).
+- Buist et al. (2008), *No effect of a graded training program on the number of running-related injuries in novice runners* (GRONORUN RCT): [RUG record](https://research.rug.nl/en/publications/no-effect-of-a-graded-training-program-on-the-number-of-running-r/).
+- Saragiotto et al. (2014), *What are the main risk factors for running-related injuries?*: [PubMed 24809248](https://pubmed.ncbi.nlm.nih.gov/24809248/).
 - Systematic review on training-load progression: [PMC9528699](https://pmc.ncbi.nlm.nih.gov/articles/PMC9528699/table/i1938-162X-57-7-650-t02).
 - Impellizzeri et al. (2020), ACWR critique: [PMC7534938](https://pmc.ncbi.nlm.nih.gov/articles/PMC7534938); editorial [PMC8138569](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8138569/).
 
@@ -572,6 +676,7 @@ Intensity distribution
 Taper, maintenance and detraining
 - Bosquet et al. (2007), *Effects of tapering on performance: a meta-analysis*: [PubMed 17762369](https://pubmed.ncbi.nlm.nih.gov/17762369/).
 - Tapering in endurance athletes (2023 meta-analysis): [PMC10171681](https://pmc.ncbi.nlm.nih.gov/articles/PMC10171681/).
+- Spiering et al. (2021), *Maintaining physical performance: the minimal dose of exercise needed*: [PubMed 33629972](https://pubmed.ncbi.nlm.nih.gov/33629972).
 - Mujika & Padilla (2000), detraining: [PubMed 11252068](https://pubmed.ncbi.nlm.nih.gov/11252068/).
 - Neufer (1989), reduced training and detraining: [PubMed 2692122](https://pubmed.ncbi.nlm.nih.gov/2692122/).
 - Detraining meta-analysis (2023): [Frontiers in Physiology](https://frontiersin.org/articles/10.3389/fphys.2023.1334766/full).
@@ -600,20 +705,20 @@ Every number the generator uses is a named constant in [`running_plan/config.py`
 | `RACE_FULL_WEIGHT_WEEKS` / `RACE_DECAY_PER_WEEK` / `RACE_MAX_AGE_WEEKS` | 8 / 0.15% / 52 | [H] | Race-result recency |
 | `DETRAINING` | §4.3 table | [E→H] | VDOT multiplier and volume restart by days off |
 | `VDOT_MAX_GAIN` per `VDOT_MAX_GAIN_WEEKS` | +1 per 3 wk | [H] | Recalibration cap |
-| `DEFAULT_VDOT_BY_LOAD_TIER` | 30 / 38 / 46 | [H] | Placeholder fitness until a time trial |
+| `TIME_TRIAL_WEEK_WITHOUT_RACE` | 3 | [C] | No race result → RPE-only until this week's TT (replaces v0.1 default-VDOT placeholder) |
 
 ### Classification & feasibility
 | Name | Value | Tag | Meaning |
 |---|---|---|---|
 | `LOAD_VOLUME_KM` | 25 / 55 | [H] | Beginner/intermediate upper bounds, weekly km |
-| `LOAD_LONG_RUN_KM` | 10 / 21 | [H] | … longest run in 30 days |
+| `LOAD_LONG_RUN_KM` | 10 / 21 | [H] | … longest run in 30 days (lowers the tier by ≤ 1 step) |
 | `LOAD_TRAINING_AGE_YR` | 1 / 3 | [H] | … years of consistent running |
 | `PERF_AGE_GRADE` | 50 / 65 % | [H] | Performance-tier bounds |
 | `AGE_GRADE_STANDARD_S`, `AGE_SLOWDOWN` | approx. | [H] | Stand-in for official WMA tables |
-| `MIN_WEEKS`, `TYPICAL_WEEKS`, `MIN_BASE` | §5.2 | [C] | Plan-length and starting-base minimums |
+| `MIN_WEEKS`, `TYPICAL_WEEKS`, `MIN_BASE` | §5.2 (FM base 40 km / 16 km) | [C] | Plan-length and starting-base minimums |
 | `VDOT_GAIN_RANGE` | §5.3 | [H] | Plausible VDOT gain per block |
 | `FEASIBILITY_REF_WEEKS` / `FEASIBILITY_SCALE_BOUNDS` | 14 / 0.5–1.2 | [H] | Scale gain range by plan length |
-| `STRETCH_FACTOR` | 1.5 | [H] | Stretch vs. unrealistic boundary |
+| Feasibility bands | accept ≤ mid, stretch ≤ top | [H] | Replaces v0.1 `STRETCH_FACTOR` (review M9) |
 
 ### Load & progression
 | Name | Value | Tag | Meaning |
@@ -625,7 +730,7 @@ Every number the generator uses is a named constant in [`running_plan/config.py`
 | `MAX_WEEKLY_INCREASE` / `MAX_TWO_WEEK_INCREASE` | 20% / 30% | [E/H] | Hard ceilings (Nielsen 2014) |
 | `DOWN_WEEK_CUT` | 22% | [C] | Down-week volume reduction |
 | `MASTERS_AGE` | 50 | [C] | Switch to 2:1 cycles |
-| `SPIKE_LIMIT` / `SPIKE_WINDOW_DAYS` | 1.10 / 28 | [E] | Any run ≤ 110% of longest in prior ~30 d (Frandsen 2025) |
+| `SPIKE_LIMIT` / `SPIKE_WINDOW_DAYS` | 1.10 / 30 | [E] | Any run ≤ 110% of longest in prior ~30 d (Frandsen 2025) |
 | `LONG_RUN_SHARE` | 55/45/40/35/30 % by days | [C/H] | Long-run share cap |
 | `LONG_RUN_MAX_MIN` / `_FM` | 150 / 180 | [C] | Long-run time caps |
 | `LONG_RUN_STEP_KM` / `LONG_RUN_DOWN_CUT` | 2 km / 28% | [C] | Long-run progression |
@@ -649,5 +754,47 @@ Every number the generator uses is a named constant in [`running_plan/config.py`
 | `MIN_EASY_RUN_KM` | 4 | [H] | Shortest easy run worth scheduling |
 | `MAINTENANCE_VOLUME` / `_LONG_RUN` | 60% / 65% | [E/H] | Maintenance sizing |
 | `RECOVERY_WEEKS` / `RECOVERY_NO_HARD_DAYS` | §7.5 | [C/H] | Reverse taper |
-| `RUN_WALK_LADDER` / `RUN_WALK_THRESHOLD_DAYS` / `RUN_WALK_PAIN_STOP` | config / 28 / 2 | [C] | Return-to-running |
+| `RUN_WALK_LADDER` / `RUN_WALK_THRESHOLD_DAYS` / `RUN_WALK_PAIN_STOP` | config / 56 / 2 | [C] | Return-to-running |
 | `VALIDATE_*_TOLERANCE` | small | n/a | Rounding slack in the validator (not rule slack) |
+
+### Rules added after review (v0.2)
+| Name | Value | Tag | Meaning |
+|---|---|---|---|
+| `MIN_PEAK_LONG_RUN` | HM 16 km / 105 min; FM 26 km / 165 min | [C/H] | Reachability check (§5.2) |
+| `SPIKE_LIMIT_AFTER_INJURY` | 1.05 | [H] | Spike limit after a recent or bone-stress injury |
+| `GOAL_PACE_T_MARGIN` | 2% | [H] | Race-pace reps this close to T are dosed as T |
+| `RESULT_DISAGREEMENT_VDOT` | 1.0 | [H] | Above this spread, weight results by distance closeness |
+| `CONSERVATIVE_GOAL_DELTA_VDOT` | −1.0 | [H] | Flag goals well below current fitness |
+| `NOVICE_CONTINUOUS_RUN_MIN` | 20 | [C] | Below this → run-walk entry |
+| `SPEED_LONG_RUN_SHARE` / `AEROBIC_BASE_MIN_EASY_SHARE` | 25% / 90% | [C] | Goal-specific limits (§7.2, §7.3) |
+| `ADAPT_CONSISTENT_OF_LAST` | 2 of 3 | [H] | Definition of "consistently" (§10) |
+| `RACE_EVE_MAX_KM` | 4 | [C] | Day-before-race run cap |
+
+---
+
+## 15. Review log
+
+**v0.2:** an independent reviewer (exercise-physiology and coaching perspective) assessed v0.1. All Critical and Major findings were accepted and applied:
+- **C1** reachability check.
+- **C2** blocking screening and stop rules.
+- **M1** race-pace dosing by actual zone, with goal pace phased in.
+- **M2** worked example recomputed from the rules.
+- **M3** caps never cut current volume.
+- **M4** long-run axis lowers the tier by at most one step.
+- **M5** return-to-running split.
+- **M6** novice run-walk entry, RPE-only until a TT in week 3–4.
+- **M7** fixed-race-date compression order and baselines from actual runs.
+- **M8** injury-history modifiers.
+- **M9** stricter feasibility.
+- **M10** weighting results by distance.
+
+Minor fixes:
+- Buist attribution for the 10%-vs-24% result.
+- Maintenance claim softened (Spiering 2021).
+- Quality-day placement made consistent with the code.
+- Recovery rule relabelled as softened.
+- Spike window set to 30 days.
+- Validator long-run slack reduced to rounding only.
+- Beginner 2:1 relabelled [H].
+
+The Buist 2008 and Spiering 2021 corrections were independently re-checked. Blagrove 2018 and Toresdahl 2020 are cited by the reviewer and **not yet verified**.
