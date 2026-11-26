@@ -1,6 +1,6 @@
 # Benchmark: How Commercial Tools Build Running Plans
 
-Status: v0.2 (2026-11-26). Compares Runna, Garmin Coach / Run Coach, TrainAsONE, VDOT O2 and open-source projects (§9) with our framework ([running-plan-framework.md](running-plan-framework.md) v0.2).
+Status: v0.2 (2026-11-26). Compares Runna, Garmin Coach / Run Coach, TrainAsONE, VDOT O2 and open-source projects (§8) with our framework ([running-plan-framework.md](running-plan-framework.md) v0.2).
 
 **Source quality.** No vendor publishes its algorithm.
 - **Runna** is the best documented. Its support centre describes its rules in some detail, and those articles were read directly (marked **[primary]**).
@@ -210,7 +210,7 @@ Status: v0.2 (2026-11-26). Compares Runna, Garmin Coach / Run Coach, TrainAsONE,
 
 ---
 
-## 9. Open-source projects
+## 8. Open-source projects
 
 Searched GitHub (repository search) and the web on 2026-11-26. The field is **small and young**: no project has more than ~10 stars, and most were created in 2025–26. The relevant ones were shallow-cloned and read; none of their code was run.
 
@@ -242,7 +242,7 @@ Searched GitHub (repository search) and the web on 2026-11-26. The field is **sm
 
 ---
 
-## 8. Sources
+## 9. Sources
 
 Primary (read in full):
 1. Runna – How does Runna build your training plan around your current fitness? https://support.runna.com/en/articles/15231838-how-does-runna-build-your-training-plan-around-your-current-fitness
