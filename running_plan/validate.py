@@ -39,7 +39,7 @@ def validate(weeks: list[Week], initial_history: list[tuple[int, float]], start_
                     errors.append(f"wk{w.index} {day.weekday}: hard sessions on consecutive days")
                 prev_hard_day = idx
             for zone, km in wo.zone_km.items():
-                if zone in C.DOSE_CAP and wo.type != "TT":
+                if zone in C.DOSE_CAP and wo.type != "TT" and not wo.is_race:
                     cap = dose_km(zone, max(w.target_km, w.total_km))
                     if km > cap + C.VALIDATE_KM_TOLERANCE:
                         errors.append(f"wk{w.index} {wo.type}: {km} km @ {zone} > cap {cap:.1f}")
