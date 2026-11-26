@@ -108,7 +108,7 @@ Use age-grade, not raw VDOT, so a 60-year-old with a 25-minute 5k is not labelle
 
 ### 4.1 VDOT from race results [C, validated formula]
 
-Daniels and Gilbert model ([reference code](./vdot.py)):
+Daniels and Gilbert model ([`running_plan/vdot.py`](../running_plan/vdot.py)). Coefficient names are in §14:
 
 ```
 v       = distance_m / time_min                              # m/min
@@ -154,7 +154,7 @@ Cross-training during the break: halve the loss [H].
 | **R** Repetition | Speed, economy, form | ≈ current mile race pace | n/a (too short) | 9 | No |
 | Strides | Neuromuscular; 15–20 s fast and relaxed | ≈ R pace, by feel | n/a | 7–8 | n/a |
 
-Reference outputs (from `vdot.py`, per km; R per 400 m):
+Reference outputs (from `running_plan/vdot.py`, per km; R per 400 m):
 
 | VDOT | 5k | FM equiv. | E | M | T | I | R/400 |
 |---|---|---|---|---|---|---|---|
@@ -284,7 +284,7 @@ Per-session dose caps (Daniels) [C]:
 ### 6.4 Long run [E/C]
 
 - **Spike rule [E]:** no single run should exceed **110% of the longest run in the previous 30 days**. Frandsen 2025 found injury rates were 64% higher for 10–30% spikes and 128% higher for spikes over 100%. Apply this to *every* run, not just the long run.
-- Share of the week [C]: long run ≤ 30% of weekly volume (up to 35–40% only for low-frequency HM/FM plans, with a warning).
+- Share of the week [C/H]: the long run is ≤ 30% of weekly volume by default. With few run days, a 30% long run would be *shorter than an average run*, so the cap scales with frequency: 2 days 55%, 3 days 45%, 4 days 40%, 5 days 35%, 6–7 days 30% (`LONG_RUN_SHARE`). The plan warns whenever the share is above 30%.
 - Time cap [C]: about 2:30 for most runners, 3:00 for beginner and intermediate marathoners (beyond that the fatigue cost outweighs the benefit).
 - Peak long-run targets, km:
 
@@ -409,53 +409,64 @@ Standard warm-up and cool-down for quality: 10–15 min E (+ strides before I/R)
 ```text
 INPUT: profile, goal, constraints
 OUTPUT: plan = weeks[] → days[] → workout{type, km|min, paces, zone, rpe, notes}
+(Names in CAPS are constants in running_plan/config.py — see §14.)
 
 1. VALIDATE & SCREEN
-   - Current pain / injury not cleared → route to return_to_running or medical advice.
-   - Missing race result → plan a time trial in week 1–2; estimate VDOT from easy pace.
+   - Current pain / injury not cleared → blocking issue; route to professional / return_to_running.
+   - Missing race result → time trial in week 1–2 (TIME_TRIAL_DISTANCE_BY_TIER);
+     VDOT from easy pace, else DEFAULT_VDOT_BY_LOAD_TIER (paces provisional).
 
 2. FITNESS
-   VDOT_cur = best recency-weighted race VDOT × detraining_multiplier(break)
-   paces    = training_paces(VDOT_cur)                       # §4.4
-   if goal.type == race: pred = predict(goal.distance), FM penalty  # §4.2
+   vdot_mult, volume_restart = DETRAINING[days_off]
+   VDOT_cur = max over races of vdot(race) × (1 − RACE_DECAY_PER_WEEK × weeks_past_full_weight)
+              × vdot_mult
+   paces    = training_paces(VDOT_cur)            # *_FRACTION_OF_VDOT
+   FM prediction × (1 + FM_PENALTY(weekly_km))
 
 3. CLASSIFY
-   load_tier  = min(volume_tier, longrun_tier, training_age_tier + 1)   # §3.1
-   perf_tier  = age_grade_tier(best recent race)                        # §3.2
+   load_tier = min(tier(weekly_km, LOAD_VOLUME_KM), tier(longest_30d, LOAD_LONG_RUN_KM),
+                   tier(training_age, LOAD_TRAINING_AGE_YR) + 1)
+   perf_tier = tier(age_grade_pct, PERF_AGE_GRADE)
 
 4. FEASIBILITY
-   check plan_weeks ≥ min_weeks(goal, load_tier)                         # §5.2
-   check ΔVDOT within plausible range(perf_tier)                         # §5.3
-   if fail → return options (later date / finish goal / revised target / base block first)
+   plan_weeks ≥ MIN_WEEKS[goal]; current base ≥ MIN_BASE[goal]   else → options, no silent compression
+   ΔVDOT = VDOT(goal) − VDOT_cur;  cap = VDOT_GAIN_RANGE[perf].hi × clamp(weeks / FEASIBILITY_REF_WEEKS,
+                                                               FEASIBILITY_SCALE_BOUNDS)
+   ΔVDOT ≤ cap → accepted;  ≤ cap × STRETCH_FACTOR → stretch;  else unrealistic (propose target)
 
-5. MACRO PLAN (work backward from race date or forward from start)
-   taper_weeks = f(goal)                                                 # §5.4
-   split remaining weeks into Base / Build / Specific                    # §5.1
-   peak_vol    = clamp(peak_target(goal, load_tier), cur, cur×1.5) ∧ freq cap ∧ time cap
-   weekly_vol[] = ramp(cur → peak, rate(load_tier), cycle = 3:1 or 2:1) then hold, then taper
-   long_run[]   = progress(longest_30d → peak_LR(goal, tier)),
-                  each week ≤ 1.10 × max(run in prior 30 d), ≤ 30% of week, ≤ time cap
+5. MACRO PLAN
+   taper  = TAPER[goal] (fractions of peak);  non-taper weeks split by PHASE_SPLIT[goal]
+   start  = weekly_km × volume_restart
+   peak   = clamp(mid(PEAK_VOLUME_KM[goal][tier]), start, start × PEAK_MAX_GROWTH)
+            ∧ days × AVG_RUN_CAP_KM[tier]
+   cycle  = 2:1 if beginner or age ≥ MASTERS_AGE else 3:1
+   build week:  vol = min(peak, last_build × (1 + RAMP_RATE[tier]))   (hold when a run day is added)
+   down week:   vol = last_build × (1 − DOWN_WEEK_CUT)
+   long run:    lr = min(prev_lr + LONG_RUN_STEP_KM, peak_lr, SPIKE_LIMIT × max_run(prior 30 d),
+                         LONG_RUN_SHARE[days] × vol, max_long_run_minutes / E_pace)
+                peak_lr = lo + PEAK_LONG_RUN_POSITION × (hi − lo) of PEAK_LONG_RUN_KM[goal][tier]
+                down week: lr × (1 − LONG_RUN_DOWN_CUT)
 
 6. WEEKLY TEMPLATE
-   slots = place(long_run_day, quality_count(tier, days), spacing rules) # §6.5
+   run days: choose_run_days (spread; TEMPLATE_* weights)
+   quality:  QUALITY_COUNT[tier][days]; ≥ HARD_DAY_MIN_GAP_DAYS apart incl. long run;
+             key session QUALITY_IDEAL_DAYS_BEFORE_LONG_RUN days before LR
 
-7. WORKOUT SELECTION per week
-   for each quality slot: choose from library by (phase, goal, perf_tier),
-       apply progression lever, enforce dose caps (§6.3)
-   long run variant by phase (E → prog → LR-M / LR-HM)
-   down weeks: same structure, quality volume −30–40%, LR −25–35%
-   insert TT / tune-up race at end of Base and mid-Build (if ≥ 10 weeks)
+7. WORKOUT SELECTION
+   hard budget (min) = (1 − MIN_EASY_SHARE) × est. week minutes
+   each session: RepSpec (T_CRUISE, I_1000_*, R_400, RACE_PACE_REPS[goal]) → reps_for(progression),
+                 then capped by DOSE_CAP[zone], hard budget, spike cap, weekday time cap
+   long-run variant by phase: LR → LR-prog (LR_PROG_*) → LR-HM (LR_HM_*) / LR-M (LR_M_*)
+   time trials in down weeks before the specific phase
 
 8. FILL & BALANCE
-   easy km = weekly_vol − LR − quality totals → split across easy days (≥ min run)
-   verify: easy share ≥ 80% of time; every run ≤ 1.10 × 30-day max; no hard-before-LR
-   if violated → reduce weekly_vol (never break safety rules to hit a target)
+   easy km = vol − LR − quality → easy days (≥ MIN_EASY_RUN_KM, ≤ spike cap, ≤ LR)
+   strides: STRIDES_PER_SESSION on 1–2 easy days
+   never break a safety rule to hit a volume target — under-fill and note it instead
 
-9. ANNOTATE
-   each workout: km, est. duration, pace range, HR/RPE alternative, purpose, warm-up/cool-down
-   weekly: total km, time, % easy, phase, coaching note
+9. VALIDATE (independent re-check, validate.py) → any violation is a bug
 
-10. ADAPT (weekly loop — see §10)
+10. ADAPT (weekly loop — §10)
 ```
 
 ---
@@ -567,3 +578,76 @@ Taper, maintenance and detraining
 
 Classification
 - WMA age-grading explanation: [WMA Road Age Standards 2010](https://world-masters-athletics.org/wp-content/uploads/2018/02/Road_Age_Standards_WMA_2010-Explanation.pdf); [USATF Masters age grading](https://usatfmasters.org/age-grading/); tables at [AlanLyttonJones/Age-Grade-Tables](https://www.github.com/AlanLyttonJones/Age-Grade-Tables).
+
+---
+
+## 14. Parameter registry
+
+Every number the generator uses is a named constant in [`running_plan/config.py`](../running_plan/config.py) (model coefficients in [`running_plan/vdot.py`](../running_plan/vdot.py)). Treat [H] values as tuning knobs.
+
+### Pace model
+| Name | Value | Tag | Meaning |
+|---|---|---|---|
+| `VO2_COST_INTERCEPT` / `_LINEAR` / `_QUADRATIC` | −4.60 / 0.182258 / 0.000104 | [E] | O₂ cost of running at v m/min |
+| `SUSTAINABLE_BASE` | 0.8 | [E] | Asymptotic %VO2max for very long efforts |
+| `SUSTAINABLE_SLOW_AMPLITUDE` / `_DECAY_PER_MIN` | 0.1894393 / 0.012778 | [E] | Slow-decay term of sustainable %VO2max |
+| `SUSTAINABLE_FAST_AMPLITUDE` / `_DECAY_PER_MIN` | 0.2989558 / 0.1932605 | [E] | Fast-decay term |
+| `EASY_FAST_FRACTION_OF_VDOT` / `EASY_SLOW_…` | 0.70 / 0.62 | [C] | Easy-zone bounds |
+| `THRESHOLD_FRACTION_OF_VDOT` | 0.88 | [C] | T pace |
+| `INTERVAL_FRACTION_OF_VDOT` | 0.975 | [C] | I pace |
+| `REPETITION_RACE_DISTANCE_M` | 1609.34 | [C] | R pace = mile race pace |
+| `FM_PENALTY` | 8% @ ≤30 km/wk → 0% @ ≥70 | [H] | Marathon prediction slow-down |
+| `RACE_FULL_WEIGHT_WEEKS` / `RACE_DECAY_PER_WEEK` / `RACE_MAX_AGE_WEEKS` | 8 / 0.15% / 52 | [H] | Race-result recency |
+| `DETRAINING` | §4.3 table | [E→H] | VDOT multiplier and volume restart by days off |
+| `VDOT_MAX_GAIN` per `VDOT_MAX_GAIN_WEEKS` | +1 per 3 wk | [H] | Recalibration cap |
+| `DEFAULT_VDOT_BY_LOAD_TIER` | 30 / 38 / 46 | [H] | Placeholder fitness until a time trial |
+
+### Classification & feasibility
+| Name | Value | Tag | Meaning |
+|---|---|---|---|
+| `LOAD_VOLUME_KM` | 25 / 55 | [H] | Beginner/intermediate upper bounds, weekly km |
+| `LOAD_LONG_RUN_KM` | 10 / 21 | [H] | … longest run in 30 days |
+| `LOAD_TRAINING_AGE_YR` | 1 / 3 | [H] | … years of consistent running |
+| `PERF_AGE_GRADE` | 50 / 65 % | [H] | Performance-tier bounds |
+| `AGE_GRADE_STANDARD_S`, `AGE_SLOWDOWN` | approx. | [H] | Stand-in for official WMA tables |
+| `MIN_WEEKS`, `TYPICAL_WEEKS`, `MIN_BASE` | §5.2 | [C] | Plan-length and starting-base minimums |
+| `VDOT_GAIN_RANGE` | §5.3 | [H] | Plausible VDOT gain per block |
+| `FEASIBILITY_REF_WEEKS` / `FEASIBILITY_SCALE_BOUNDS` | 14 / 0.5–1.2 | [H] | Scale gain range by plan length |
+| `STRETCH_FACTOR` | 1.5 | [H] | Stretch vs. unrealistic boundary |
+
+### Load & progression
+| Name | Value | Tag | Meaning |
+|---|---|---|---|
+| `PEAK_VOLUME_KM` | §6.1 | [C] | Peak weekly km by goal × tier |
+| `PEAK_MAX_GROWTH` | 1.5 | [H] | Peak ≤ 1.5 × starting volume |
+| `AVG_RUN_CAP_KM` | 10 / 13 / 16 | [H] | Frequency cap: peak ≤ days × this |
+| `RAMP_RATE` | 6 / 9 / 10 % | [H] | Build-week increase by tier |
+| `MAX_WEEKLY_INCREASE` / `MAX_TWO_WEEK_INCREASE` | 20% / 30% | [E/H] | Hard ceilings (Nielsen 2014) |
+| `DOWN_WEEK_CUT` | 22% | [C] | Down-week volume reduction |
+| `MASTERS_AGE` | 50 | [C] | Switch to 2:1 cycles |
+| `SPIKE_LIMIT` / `SPIKE_WINDOW_DAYS` | 1.10 / 28 | [E] | Any run ≤ 110% of longest in prior ~30 d (Frandsen 2025) |
+| `LONG_RUN_SHARE` | 55/45/40/35/30 % by days | [C/H] | Long-run share cap |
+| `LONG_RUN_MAX_MIN` / `_FM` | 150 / 180 | [C] | Long-run time caps |
+| `LONG_RUN_STEP_KM` / `LONG_RUN_DOWN_CUT` | 2 km / 28% | [C] | Long-run progression |
+| `PEAK_LONG_RUN_KM` / `PEAK_LONG_RUN_POSITION` | §6.4 / 0.4 | [C/H] | Peak LR range and where to aim in it |
+| `TAPER`, `TAPER_LONG_RUN` | §5.4 | [E] | Taper volume fractions (Bosquet 2007) |
+
+### Intensity & sessions
+| Name | Value | Tag | Meaning |
+|---|---|---|---|
+| `MIN_EASY_SHARE` / `_BEGINNER` | 80% / 85% | [E/C] | Minimum easy share of running time |
+| `DOSE_CAP` | §6.3 | [C] | Per-session caps by zone (Daniels) |
+| `QUALITY_COUNT` | §6.5 | [C/H] | Quality sessions by tier × days |
+| `HARD_DAY_MIN_GAP_DAYS` / `QUALITY_IDEAL_DAYS_BEFORE_LONG_RUN` | 2 / 3 | [C] | Hard-day spacing |
+| `TEMPLATE_*` weights | 3 / 2 / 2 | [H] | Run-day selection scoring |
+| `RepSpec` sessions: `T_CRUISE*`, `I_1000_*`, `R_400`, `RACE_PACE_REPS` | config | [C/H] | Rep length options, start/max/min reps, progression rate, recovery |
+| `TAPER_REP_LENGTH_SCALE` / `_COUNT_REDUCTION` | 0.5 / 1 | [H] | Taper sharpener sizing |
+| `TEMPO_*` | 20 + 5/step; beginner 15 + 2, ≤ 20 | [C/H] | Tempo duration |
+| `FARTLEK_*`, `HILL_SPRINT_*`, `STRIDE_*` | config | [C] | Session structure |
+| `LR_PROG_*`, `LR_HM_*`, `LR_M_*` | config | [C/H] | Long-run fast-segment sizing |
+| `WARMUP_KM` / `MIN_WARMUP_KM` / `WARMUP_SHRINK_STEP_KM` | 1.5–3 / 1 / 0.5 | [H] | Warm-up sizing |
+| `MIN_EASY_RUN_KM` | 4 | [H] | Shortest easy run worth scheduling |
+| `MAINTENANCE_VOLUME` / `_LONG_RUN` | 60% / 65% | [E/H] | Maintenance sizing |
+| `RECOVERY_WEEKS` / `RECOVERY_NO_HARD_DAYS` | §7.5 | [C/H] | Reverse taper |
+| `RUN_WALK_LADDER` / `RUN_WALK_THRESHOLD_DAYS` / `RUN_WALK_PAIN_STOP` | config / 28 / 2 | [C] | Return-to-running |
+| `VALIDATE_*_TOLERANCE` | small | n/a | Rounding slack in the validator (not rule slack) |
