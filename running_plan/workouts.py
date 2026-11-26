@@ -25,6 +25,7 @@ class Ctx:
     cap_km: float               # max single-run distance this week (spike rule, ≤ long run)
     cap_min: float | None       # weekday time cap
     hard_budget_min: float      # hard minutes this session may use
+    easy_by_effort: bool = False   # VDOT below table floor: E is a ceiling, not a range (§4.4)
 
     @property
     def wu(self) -> float:
@@ -43,6 +44,8 @@ def dose_km(zone: str, weekly_km: float) -> float:
 
 
 def pace_str(ctx: Ctx, zone: str) -> str:
+    if zone == "E" and ctx.easy_by_effort:
+        return f"by effort (full sentences), no faster than {fmt_duration(ctx.paces['E_fast'])}/km; walk breaks OK"
     if zone == "E":
         return f"{fmt_duration(ctx.paces['E_fast'])}-{fmt_duration(ctx.paces['E_slow'])}/km"
     return f"{fmt_duration(ctx.paces[zone])}/km"

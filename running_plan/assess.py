@@ -145,6 +145,18 @@ def feasibility(goal: Goal, v_cur: float | None, perf: str, weeks: int,
     return "unrealistic", v_goal, real_str
 
 
+def run_walk_entry_rung(continuous_min: float | None) -> int | None:
+    """Ladder rung to start on, or None if the runner can already run continuously (§7.7).
+
+    Start on the hardest rung whose run segment the runner can already do, so someone who
+    can run 12 min does not restart at 1 min run / 1 min walk.
+    """
+    if continuous_min is None or continuous_min >= C.NOVICE_CONTINUOUS_RUN_MIN:
+        return None
+    fits = [i for i, (run, _, _) in enumerate(C.RUN_WALK_LADDER) if run <= continuous_min]
+    return fits[-1] if fits else 0
+
+
 def assess(p: Profile, goal: Goal, weeks: int) -> Assessment:
     v, src = current_vdot(p, goal.distance if goal.type == "race" else None)
     ag = best_age_grade(p)
@@ -157,14 +169,34 @@ def assess(p: Profile, goal: Goal, weeks: int) -> Assessment:
                 t *= 1 + fm_penalty(p.weekly_volume_km)
             preds[name] = fmt_duration(t * C.SECONDS_PER_MINUTE)
         tp = training_paces(v)
+        easy = (f"by effort, no faster than {fmt_duration(tp['E_fast'])}/km"
+                if v < C.EFFORT_BASED_EASY_BELOW_VDOT
+                else f"{fmt_duration(tp['E_fast'])}-{fmt_duration(tp['E_slow'])}/km")
         paces = {
-            "E": f"{fmt_duration(tp['E_fast'])}-{fmt_duration(tp['E_slow'])}/km",
+            "E": easy,
             "M": f"{fmt_duration(tp['M'])}/km", "T": f"{fmt_duration(tp['T'])}/km",
             "I": f"{fmt_duration(tp['I'])}/km", "R": f"{fmt_duration(tp['R'] / REPS_400M_PER_KM)}/400m",
         }
     status, v_goal, realistic = feasibility(goal, v, pt, weeks, p.weekly_volume_km)
+    notes = []
+    by_effort = v is not None and v < C.EFFORT_BASED_EASY_BELOW_VDOT
+    low_conf = by_effort or src.startswith("estimated")
+    if by_effort:
+        notes.append(f"VDOT {v:.1f} is below the published tables ({C.EFFORT_BASED_EASY_BELOW_VDOT:g}): "
+                     "paces are extrapolated. Easy and long runs are by effort; walk breaks are fine.")
+    rung = run_walk_entry_rung(p.can_run_continuous_min)
+    if p.can_run_continuous_min is None:
+        notes.append(f"Ask: can you run {C.NOVICE_CONTINUOUS_RUN_MIN} min non-stop? "
+                     "If not, the plan starts with run-walk.")
+    elif rung is not None:
+        run, walk, reps = C.RUN_WALK_LADDER[rung]
+        start = f"{reps} × ({run} min run / {walk} min walk)" if walk else f"{run} min continuous"
+        notes.append(f"Run-walk first: start at {start} and progress to "
+                     f"{C.NOVICE_CONTINUOUS_RUN_MIN} min continuous before hard sessions.")
     return Assessment(vdot=round(v, 1) if v else None, vdot_source=src, load_tier=lt,
                       perf_tier=pt, age_grade_pct=round(ag, 1) if ag else None,
                       display_level=lt, predictions=preds, paces=paces,
                       goal_vdot=round(v_goal, 1) if v_goal else None,
-                      feasibility=status, realistic_target=realistic)
+                      feasibility=status, realistic_target=realistic,
+                      easy_by_effort=by_effort, pace_confidence="low" if low_conf else "normal",
+                      run_walk_entry_rung=rung, notes=notes)

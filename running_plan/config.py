@@ -144,7 +144,10 @@ RUN_WALK_LADDER = ((1, 1, 10), (2, 1, 8), (3, 1, 7), (4, 1, 6), (5, 1, 5), (8, 1
                    (10, 1, 2), (20, 0, 1), (22, 0, 1), (24, 0, 1), (26, 0, 1), (28, 0, 1),
                    (30, 0, 1))
 RUN_WALK_THRESHOLD_DAYS = 56   # non-injury breaks longer than this restart with run-walk [C]
-NOVICE_CONTINUOUS_RUN_MIN = 20  # cannot run this long continuously → run-walk entry [C]
+NOVICE_CONTINUOUS_RUN_MIN = 30  # cannot run this long continuously → run-walk entry [C]
+# Below this VDOT (the floor of Daniels' published tables) paces are extrapolated:
+# easy and long runs are prescribed by effort, with E_fast only as a speed limit. [C/H]
+EFFORT_BASED_EASY_BELOW_VDOT = 30.0
 
 # --- Units -------------------------------------------------------------------
 SECONDS_PER_MINUTE = 60

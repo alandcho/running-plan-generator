@@ -42,7 +42,7 @@ Each rule below is tagged with its evidence level:
 | `current_pain`, `injury_cleared` | bools | Current pain or an uncleared injury → blocking screen (§12). |
 | `health_screen` | PAR-Q+ style answers | Chest pain, fainting, known cardiac/metabolic/renal disease, medications. Any "yes" → blocking until a clinician clears (§12). |
 | `energy_availability_screen` | optional answers | No periods ≥ 3 months, prior bone-stress injury, disordered eating → refer (RED-S, §12). |
-| `can_run_continuous_min` | number | Minutes of continuous easy running possible today. < 20 → run-walk entry (§7.7). |
+| `can_run_continuous_min` | number | Minutes of continuous easy running possible today. **Always asked.** < 30 → run-walk entry (§7.7). |
 | `easy_pace_s_per_km`, `hr_max`, `hr_rest` | optional | Fallback when there are no race results; enables HR zones. |
 
 ### 2.2 Goal
@@ -176,6 +176,7 @@ Validation: Daniels' published VDOT 40 row gives 10k 50:03, FM 3:49:45, T 5:06 a
 - E, T, I and R use **current** VDOT. Training at goal fitness before having it is the most common cause of overcooked plans.
 - **Goal race pace is not used from day one.** Race-pace work starts at the **predicted** race pace from current VDOT. It moves toward goal pace only as recalibrated VDOT (tune-ups and time trials) supports it. A goal that needs +1.3 VDOT cannot be trained at goal pace in week 8 if the runner has not gained that fitness yet.
 - **Dose by the zone the pace actually falls in.** If a race-pace rep is within `GOAL_PACE_T_MARGIN` (2%) of current T pace, or faster, it counts against the **T cap** (10% of weekly volume), not the race-pace cap. Example: goal HM pace 5:07/km against current T 5:05/km is threshold work.
+- **Below VDOT 30 (`EFFORT_BASED_EASY_BELOW_VDOT`), easy runs are by effort [C/H].** Daniels' tables start at VDOT 30 (about a 30:40 5k), so slower paces are extrapolated. Near this level the E range also overlaps brisk walking (a 41:00 5k gives E 10:00–10:50/km). Easy and long runs are then prescribed by talk test and RPE 2–4, with E_fast shown only as a speed limit ("no faster than 10:00/km"), and walk breaks are explicitly allowed. All paces are labelled low-confidence until a time trial confirms them.
 - Recalculate VDOT after each tune-up race or time trial. Move paces up by **at most +1 VDOT per 3–4 weeks**, even if a race suggests more [H, after Daniels].
 
 ---
@@ -402,8 +403,11 @@ Reduced-training research (Spiering 2021 review, built largely on Hickson's 1980
 
 ### 7.7 General fitness and true novices
 
-- **Can run ≥ 20 min continuously:** 3–4 days per week, 20–45 min, mostly E with strides. Optional fartlek once per week after week 4. Progression per §6.2 with a Beginner ramp.
-- **Cannot run 20 min continuously** (`NOVICE_CONTINUOUS_RUN_MIN`): start on the run-walk ladder (§7.6) as a couch-to-5k entry, 3 sessions/week, prescribed in **minutes and RPE/talk test only**, with no paces. After continuous 30 min, switch to the general-fitness plan. Offer a 3k time trial once 3 weeks of continuous running are logged.
+The generator always asks "Can you run 30 minutes non-stop?" (`can_run_continuous_min`). If the answer is missing, the plan warns and assumes yes.
+
+- **Can run ≥ 30 min continuously:** 3–4 days per week, 20–45 min, mostly E with strides. Optional fartlek once per week after week 4. Progression per §6.2 with a Beginner ramp.
+- **Cannot run 30 min continuously** (`NOVICE_CONTINUOUS_RUN_MIN`): start on the run-walk ladder (§7.6), prescribed in **minutes and RPE/talk test only**, with no paces and no hard sessions. Entry is the hardest rung whose run segment the runner can already do (someone who can run 12 min starts at 10 min run / 1 min walk, not 1/1). After continuous 30 min, the goal plan starts. Offer a time trial once 3 weeks of continuous running are logged.
+- **Runner already logs real volume with walk breaks** (for example 25 km/week of run-walk): keep the current weekly time, and apply the rung's run:walk ratio *inside* each run instead of shortening sessions to the ladder's length. Progress the ratio, not the volume, until runs are continuous [H]. Not yet implemented in code.
 
 ---
 
@@ -472,7 +476,9 @@ OUTPUT: plan = weeks[] → days[] → workout{type, km|min, paces, zone, rpe, no
 
 1. VALIDATE & SCREEN
    - Health screen "yes", RED-S screen "yes", current pain, or injury not cleared → blocking.
-   - can_run_continuous_min < NOVICE_CONTINUOUS_RUN_MIN → run-walk entry (§7.7).
+   - can_run_continuous_min < NOVICE_CONTINUOUS_RUN_MIN (30) → run-walk entry (§7.7),
+     starting at the matching ladder rung; no hard sessions until 30 min continuous.
+   - VDOT < EFFORT_BASED_EASY_BELOW_VDOT → E/LR by effort, E_fast as a ceiling (§4.4).
    - Missing race result → RPE/talk-test prescription; time trial in week 3–4
      (TIME_TRIAL_DISTANCE_BY_TIER). Easy-pace estimate maps to E_fast (low confidence).
 
@@ -765,7 +771,8 @@ Every number the generator uses is a named constant in [`running_plan/config.py`
 | `GOAL_PACE_T_MARGIN` | 2% | [H] | Race-pace reps this close to T are dosed as T |
 | `RESULT_DISAGREEMENT_VDOT` | 1.0 | [H] | Above this spread, weight results by distance closeness |
 | `CONSERVATIVE_GOAL_DELTA_VDOT` | −1.0 | [H] | Flag goals well below current fitness |
-| `NOVICE_CONTINUOUS_RUN_MIN` | 20 | [C] | Below this → run-walk entry |
+| `NOVICE_CONTINUOUS_RUN_MIN` | 30 | [C] | Below this → run-walk entry (raised from 20 in v0.3) |
+| `EFFORT_BASED_EASY_BELOW_VDOT` | 30 | [C/H] | Below this, easy runs by effort; E_fast is a ceiling |
 | `SPEED_LONG_RUN_SHARE` / `AEROBIC_BASE_MIN_EASY_SHARE` | 25% / 90% | [C] | Goal-specific limits (§7.2, §7.3) |
 | `ADAPT_CONSISTENT_OF_LAST` | 2 of 3 | [H] | Definition of "consistently" (§10) |
 | `RACE_EVE_MAX_KM` | 4 | [C] | Day-before-race run cap |
@@ -798,3 +805,7 @@ Minor fixes:
 - Beginner 2:1 relabelled [H].
 
 The Buist 2008 and Spiering 2021 corrections were independently re-checked. Blagrove 2018 and Toresdahl 2020 are cited by the reviewer and **not yet verified**.
+
+**v0.3 (test with a 41:00 5k runner):** concerns found by hand-building a plan, resolved one at a time.
+- Validator applied session dose caps to the race itself: fixed.
+- Easy pace overlapped walking speed and the pace model was extrapolated: continuous-run question always asked with a 30 min threshold and ladder entry by ability; easy runs by effort below VDOT 30 (§4.4, §7.7).

@@ -32,6 +32,7 @@ class Profile:
     current_pain: bool = False
     injury_cleared: bool = True
     max_long_run_ever_km: float | None = None
+    can_run_continuous_min: float | None = None   # None = not asked; treated as able (warn)
 
 
 @dataclass
@@ -123,6 +124,10 @@ class Assessment:
     goal_vdot: float | None = None
     feasibility: str = "n/a"            # accepted | stretch | unrealistic | n/a
     realistic_target: str | None = None
+    easy_by_effort: bool = False        # VDOT below the table floor (§4.4)
+    pace_confidence: str = "normal"     # normal | low
+    run_walk_entry_rung: int | None = None   # index into RUN_WALK_LADDER; None = continuous
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
