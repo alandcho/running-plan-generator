@@ -1,6 +1,6 @@
 # Benchmark: How Commercial Tools Build Running Plans
 
-Status: v0.1 (2026-11-26). Compares Runna, Garmin Coach / Run Coach, TrainAsONE and VDOT O2 with our framework ([running-plan-framework.md](running-plan-framework.md) v0.2).
+Status: v0.2 (2026-11-26). Compares Runna, Garmin Coach / Run Coach, TrainAsONE, VDOT O2 and open-source projects (§9) with our framework ([running-plan-framework.md](running-plan-framework.md) v0.2).
 
 **Source quality.** No vendor publishes its algorithm.
 - **Runna** is the best documented. Its support centre describes its rules in some detail, and those articles were read directly (marked **[primary]**).
@@ -207,6 +207,38 @@ Status: v0.1 (2026-11-26). Compares Runna, Garmin Coach / Run Coach, TrainAsONE 
 - **Runna's level definitions** (single comfortable run distance). We keep the two-axis classification, which also uses weekly volume and training age.
 - **Runna's 3-week taper for HM and plans of 10+ weeks.** We keep ~2 weeks for HM, per the Bosquet 2007 meta-analysis. Runna's choice is defensible for less-trained runners, so this could become a setting.
 - **Same build rate for all levels.** Runna gives experienced runners higher targets, not faster rates. Our rates differ slightly by tier (6/9/10%). Neither choice is evidence-based; this is open question Q9.
+
+---
+
+## 9. Open-source projects
+
+Searched GitHub (repository search) and the web on 2026-11-26. The field is **small and young**: no project has more than ~10 stars, and most were created in 2025–26. The relevant ones were shallow-cloned and read; none of their code was run.
+
+| Project | What it is | Licence | Approach vs. ours |
+|---|---|---|---|
+| [adrienpoly/strava-running-coach](https://github.com/adrienpoly/strava-running-coach) | Claude skill plus a tested Python script (`runcoach.py`: digest, paces, check, activity). Reads Strava, builds, checks and adapts plans | **MIT** | **Closest in philosophy.** Same evidence choices: Frandsen 2025 per-run spike rule, rejects ACWR, paces from current fitness rather than goal, a goal verdict, labels conventions as conventions. Goes further on *data*: classifies runs from Strava, checks easy runs by heart rate, run-level analysis (splits, HR drift, reps vs. target), layoff discount. Plan design is left to the LLM and then linted; ours is a deterministic generator. |
+| [GeoffreyDjof/running-plan-engine](https://github.com/GeoffreyDjof/running-plan-engine) | Deterministic Python engine (Pydantic I/O, French output), VDOT paces, safety validator, typed refusals (`VOLUME_TOO_LOW_FOR_GOAL`, `GOAL_TOO_SOON`, `INJURY_BLOCKS_QUALITY`) | **none** (all rights reserved) | **Closest in architecture.** Named constants, validator and refusal codes, like ours. Differences: fixed templates per level × distance × days instead of computed weeks; 10% weekly cap and 75–80% easy share; long-run share 35/38/40% by tier; injury caps long run at 30% and blocks quality. No spike rule, FM penalty or screening. |
+| [neilasiii/Stridion](https://github.com/neilasiii/Stridion) | Self-hosted AI running coach using Claude Code as the reasoning engine; VDOT-based | none | An LLM-first coach, not a rules engine. |
+| [AustinOrphan/training-plan-generator](https://github.com/AustinOrphan/training-plan-generator) | TypeScript library: VDOT, critical speed, periodization, 80/20, **ACWR** | none | Broad but unfinished ("advanced features coming soon"). Relies on ACWR, which our research rejects. |
+| [hoovercj/time-to-run](https://github.com/hoovercj/time-to-run) | Web app: pick a published plan (Pfitzinger, Hansons, Higdon), set the race date, export to a calendar | MIT (code) | Static plans, no personalisation. Its plan content comes from copyrighted books. |
+| [johanneskasser/zenit-it.fit](https://github.com/johanneskasser/zenit-it.fit) | Training-plan *editor* for runners (Supabase) | MIT | Editing and management UI, not generation. |
+| [PatrickWiloak/proper-distance-running-training-guidance](https://github.com/PatrickWiloak/proper-distance-running-training-guidance) | Evidence-based written guide: principles, workouts, HR/VDOT zones | CC BY 4.0 | Documentation, not code. A useful cross-check for our research doc. |
+
+**Takeaways**
+1. **No mature open-source equivalent exists.** Nothing combines deterministic generation, evidence tagging, feasibility and reachability checks, screening and an independent validator. That supports building our own.
+2. **Reuse is mostly ideas, not code.** Two of the three closest projects have no licence, so their code can't legally be reused. strava-running-coach is MIT, so its Strava digest and run-analysis logic could be adapted with attribution.
+3. **Ideas worth taking:**
+   - **From strava-running-coach:**
+     - baseline volume computed three ways from logged runs
+     - run classification from Strava
+     - easy-run check by heart rate
+     - per-run feedback (splits, HR drift, reps vs. target)
+     - an A goal, B goal and checkpoint in the goal verdict
+   - **From running-plan-engine:**
+     - typed refusal codes with exit codes in the CLI
+     - an as-of date so the same input always gives the same plan
+     - a VDOT self-check against a reference anchor (5k 20:00 → VDOT ≈ 51 ± 0.5)
+4. Both close projects arrived independently at the same core rules we did (spike rule or 10% cap, ≥ 75–80% easy, named constants, validator). That's a reasonable sign the design is sound, not proof.
 
 ---
 
