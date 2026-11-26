@@ -160,7 +160,11 @@ EASY_FAST_FRACTION_OF_VDOT = 0.70     # fast end of the easy range
 EASY_SLOW_FRACTION_OF_VDOT = 0.62     # slow end of the easy range
 THRESHOLD_FRACTION_OF_VDOT = 0.88     # ≈ race pace held for ~50-60 min
 INTERVAL_FRACTION_OF_VDOT = 0.975     # ≈ 3k-5k race pace
-REPETITION_RACE_DISTANCE_M = 1609.34  # R pace = current mile race pace
+REPETITION_RACE_DISTANCE_M = 1609.34  # R pace = current mile race pace [C]
+# ...or the pace of an all-out race this long, whichever is faster. Slow runners' mile
+# lasts 9-12+ min, so mile pace collapses onto I pace; a 6-min race keeps R ~7.5% faster
+# than I at every level and matches Daniels' mile pace around VDOT 50. [H]
+REPETITION_RACE_DURATION_MIN = 6.0
 FARTLEK_ON_ZONE = "10k"               # 'on' segments run at ~10k effort
 WALK_PACE_S_PER_KM = 600              # used only to estimate run-walk distance
 VDOT_SEARCH_RANGE = (20.0, 85.0)      # bisection bounds when inverting easy pace -> VDOT

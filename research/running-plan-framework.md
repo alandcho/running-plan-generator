@@ -157,15 +157,15 @@ Cross-training during the break: halve the loss [H].
 | **M** Marathon | FM-specific; steady aerobic | VDOT marathon-equivalent pace | 80–88% | 5–6 | Short sentences |
 | **T** Threshold | Raise lactate threshold; "comfortably hard" | 88% of VDOT (≈ race pace for ~50–60 min) | 88–92% | 6–7 | A few words |
 | **I** Interval | VO2max | 97.5–100% of VDOT (≈ 3k–5k race pace) | 95–100% (at end of rep) | 8–9 | No |
-| **R** Repetition | Speed, economy, form | ≈ current mile race pace | n/a (too short) | 9 | No |
+| **R** Repetition | Speed, economy, form | Faster of current mile race pace and 6-min race pace | n/a (too short) | 9 | No |
 | Strides | Neuromuscular; 15–20 s fast and relaxed | ≈ R pace, by feel | n/a | 7–8 | n/a |
 
 Reference outputs (from `running_plan/vdot.py`, per km; R per 400 m):
 
 | VDOT | 5k | FM equiv. | E | M | T | I | R/400 |
 |---|---|---|---|---|---|---|---|
-| 40 | 24:06 | 3:49:37 | 6:07–6:44 | 5:27 | 5:06 | 4:41 | 1:46 |
-| 45 | 21:49 | 3:28:16 | 5:34–6:08 | 4:56 | 4:38 | 4:16 | 1:36 |
+| 40 | 24:06 | 3:49:37 | 6:07–6:44 | 5:27 | 5:06 | 4:41 | 1:44 (mile pace: 1:46) |
+| 45 | 21:49 | 3:28:16 | 5:34–6:08 | 4:56 | 4:38 | 4:16 | 1:35 (mile pace: 1:36) |
 | 50 | 19:56 | 3:10:40 | 5:07–5:38 | 4:31 | 4:15 | 3:55 | 1:27 |
 | 55 | 18:22 | 2:55:55 | 4:44–5:13 | 4:10 | 3:56 | 3:37 | 1:20 |
 | 60 | 17:03 | 2:43:22 | 4:25–4:52 | 3:52 | 3:40 | 3:23 | 1:14 |
@@ -177,6 +177,7 @@ Validation: Daniels' published VDOT 40 row gives 10k 50:03, FM 3:49:45, T 5:06 a
 - **Goal race pace is not used from day one.** Race-pace work starts at the **predicted** race pace from current VDOT. It moves toward goal pace only as recalibrated VDOT (tune-ups and time trials) supports it. A goal that needs +1.3 VDOT cannot be trained at goal pace in week 8 if the runner has not gained that fitness yet.
 - **Dose by the zone the pace actually falls in.** If a race-pace rep is within `GOAL_PACE_T_MARGIN` (2%) of current T pace, or faster, it counts against the **T cap** (10% of weekly volume), not the race-pace cap. Example: goal HM pace 5:07/km against current T 5:05/km is threshold work.
 - **Below VDOT 30 (`EFFORT_BASED_EASY_BELOW_VDOT`), easy runs are by effort [C/H].** Daniels' tables start at VDOT 30 (about a 30:40 5k), so slower paces are extrapolated. Near this level the E range also overlaps brisk walking (a 41:00 5k gives E 10:00–10:50/km). Easy and long runs are then prescribed by talk test and RPE 2–4, with E_fast shown only as a speed limit ("no faster than 10:00/km"), and walk breaks are explicitly allowed. All paces are labelled low-confidence until a time trial confirms them.
+- **R pace has a duration floor [H].** Daniels sets R at mile race pace, which assumes a mile of roughly 5–7 minutes. A slow runner's mile lasts 9–12+ minutes, so mile pace drifts onto I pace (1% apart at VDOT 21). R is therefore the faster of mile pace and the pace of a 6-minute all-out race (`REPETITION_RACE_DURATION_MIN`). That keeps R about 7.5% faster than I at every level and leaves Daniels' values unchanged from about VDOT 50 up.
 - Recalculate VDOT after each tune-up race or time trial. Move paces up by **at most +1 VDOT per 3–4 weeks**, even if a race suggests more [H, after Daniels].
 
 ---
@@ -706,7 +707,7 @@ Every number the generator uses is a named constant in [`running_plan/config.py`
 | `EASY_FAST_FRACTION_OF_VDOT` / `EASY_SLOW_…` | 0.70 / 0.62 | [C] | Easy-zone bounds |
 | `THRESHOLD_FRACTION_OF_VDOT` | 0.88 | [C] | T pace |
 | `INTERVAL_FRACTION_OF_VDOT` | 0.975 | [C] | I pace |
-| `REPETITION_RACE_DISTANCE_M` | 1609.34 | [C] | R pace = mile race pace |
+| `REPETITION_RACE_DISTANCE_M` / `REPETITION_RACE_DURATION_MIN` | 1609.34 / 6 min | [C] / [H] | R pace = the faster of mile race pace and 6-min race pace |
 | `FM_PENALTY` | 8% @ ≤30 km/wk → 0% @ ≥70 | [H] | Marathon prediction slow-down |
 | `RACE_FULL_WEIGHT_WEEKS` / `RACE_DECAY_PER_WEEK` / `RACE_MAX_AGE_WEEKS` | 8 / 0.15% / 52 | [H] | Race-result recency |
 | `DETRAINING` | §4.3 table | [E→H] | VDOT multiplier and volume restart by days off |
@@ -809,3 +810,4 @@ The Buist 2008 and Spiering 2021 corrections were independently re-checked. Blag
 **v0.3 (test with a 41:00 5k runner):** concerns found by hand-building a plan, resolved one at a time.
 - Validator applied session dose caps to the race itself: fixed.
 - Easy pace overlapped walking speed and the pace model was extrapolated: continuous-run question always asked with a 30 min threshold and ladder entry by ability; easy runs by effort below VDOT 30 (§4.4, §7.7).
+- R pace collapsed onto I pace for slow runners: R is now the faster of mile pace and 6-min race pace (§4.4).

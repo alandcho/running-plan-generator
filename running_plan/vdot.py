@@ -81,7 +81,8 @@ def training_paces(v: float) -> dict[str, float]:
         "M": race_pace_s_per_km(v, DISTANCES_M["FM"]),
         "T": s_per_km(velocity_for_vo2(C.THRESHOLD_FRACTION_OF_VDOT * v)),
         "I": s_per_km(velocity_for_vo2(C.INTERVAL_FRACTION_OF_VDOT * v)),
-        "R": race_pace_s_per_km(v, C.REPETITION_RACE_DISTANCE_M),
+        "R": min(race_pace_s_per_km(v, C.REPETITION_RACE_DISTANCE_M),
+                 s_per_km(velocity_for_vo2(v * pct_vo2max(C.REPETITION_RACE_DURATION_MIN)))),
     }
 
 
